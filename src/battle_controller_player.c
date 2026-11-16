@@ -1398,10 +1398,25 @@ static void OpenBagAndChooseItem(void)
     }
 }
 
+// The Vita/Ui bag keeps the battle screen alive, so nothing redraws the healthboxes afterwards (vanilla
+// rebuilds them in ReshowBattleScreenAfterMenu). Without this a healed HP bar stays stale until the next hit.
+static void RefreshPlayerHealthboxesAfterItem(void)
+{
+    u32 b;
+
+    for (b = 0; b < gBattlersCount; b++)
+    {
+        if (GetBattlerSide(b) != B_SIDE_PLAYER || (gAbsentBattlerFlags & gBitTable[b]))
+            continue;
+        UpdateHealthboxAttribute(gHealthboxSpriteIds[b], &gPlayerParty[gBattlerPartyIndexes[b]], HEALTHBOX_ALL);
+    }
+}
+
 static void CompleteWhenChoseItem(void)
 {
     if (!VitaUI_IsOpen() && !Ui_IsOpen())
     {
+        RefreshPlayerHealthboxesAfterItem();
         BtlController_EmitOneReturnValue(B_COMM_TO_ENGINE, gSpecialVar_ItemId);
         PlayerBufferExecCompleted();
     }
