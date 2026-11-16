@@ -27,14 +27,49 @@ from core import Builder, validate_rom          # noqa: E402
 from core.source import Source, SourceError     # noqa: E402
 
 
+class SafeOut:
+    """Wraps the output stream. A windowed exe can hold a handle that opens but cannot be written to (OSError 22);
+    on the first failed write or flush the output moves to cli.log instead of crashing the build."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.fallback = None
+
+    def _log(self):
+        if self.fallback is None:
+            from core.settings import app_home
+            self.fallback = open(os.path.join(app_home(), "cli.log"), "w", encoding="utf-8", errors="replace")
+        return self.fallback
+
+    def write(self, text):
+        if self.fallback is None:
+            try:
+                return self.stream.write(text)
+            except (OSError, ValueError):
+                pass
+        return self._log().write(text)
+
+    def flush(self):
+        if self.fallback is None:
+            try:
+                return self.stream.flush()
+            except (OSError, ValueError):
+                pass
+        self._log().flush()
+
+    def isatty(self):
+        return False
+
+
 def setup_stdout():
-    """A windowed (no console) exe has no stdout: use the redirected handle if there is one, else a log file."""
+    """A windowed (no console) exe has no stdout: use the redirected handle if there is one, else a log file.
+    Either way writes are guarded by SafeOut."""
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout = sys.stderr = SafeOut(sys.stdout)
         return
     try:
-        sys.stdout = open(1, "w", encoding="utf-8", errors="replace", closefd=False)
-        sys.stderr = sys.stdout
+        sys.stdout = sys.stderr = SafeOut(open(1, "w", encoding="utf-8", errors="replace", closefd=False))
     except OSError:
         from core.settings import app_home
         sys.stdout = sys.stderr = open(os.path.join(app_home(), "cli.log"), "w", encoding="utf-8")
