@@ -1006,6 +1006,7 @@ void MultiplyPaletteRGBComponents(u16 i, u8 r, u8 g, u8 b)
 
 // Sprite data for SpriteCB_PokeballGlow
 #define sEffectSpriteId data[0]
+#define sHealMachine    data[7] // set for the Pokecenter's balls (the Hall of Fame's are not)
 
 bool8 FldEff_PokecenterHeal(void)
 {
@@ -1151,6 +1152,7 @@ static void PokeballGlowEffect_PlaceBalls(struct Sprite *sprite)
         spriteId = CreateSpriteAtEnd(&sSpriteTemplate_PokeballGlow, sPokeballCoordOffsets[sprite->sCounter].x + sprite->x2, sPokeballCoordOffsets[sprite->sCounter].y + sprite->y2, 0);
         gSprites[spriteId].oam.priority = 2;
         gSprites[spriteId].sEffectSpriteId = sprite->sSpriteId;
+        gSprites[spriteId].sHealMachine = sprite->sPlayHealSe; // only the Pokecenter plays the heal jingle
         sprite->sCounter++;
         sprite->sNumMons--;
         PlaySE(SE_BALL);
@@ -1258,6 +1260,19 @@ static void SpriteCB_PokeballGlow(struct Sprite *sprite)
     {
         FieldEffectFreeGraphicsResources(sprite);
     }
+}
+
+// Port: the balls (and the monitor's flash) of the Pokecenter's healing machine are placed in
+// screen pixels, for the GBA's camera. The 3D field draws them as billboards on the machine
+// (voxel_entities.c) and keeps them out of the GBA overlay.
+bool8 FieldEffect_IsHealMachineBall(const struct Sprite *sprite)
+{
+    return sprite->template == &sSpriteTemplate_PokeballGlow && sprite->sHealMachine != 0;
+}
+
+bool8 FieldEffect_IsHealMachineMonitor(const struct Sprite *sprite)
+{
+    return sprite->template == &sSpriteTemplate_PokecenterMonitor;
 }
 
 static u8 CreatePokecenterMonitorSprite(s16 x, s16 y)

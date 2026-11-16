@@ -3,6 +3,7 @@
 #include "main.h"
 #include "palette.h"
 #include "field_weather.h"
+#include "field_effect.h"
 
 #define MAX_SPRITE_COPY_REQUESTS 64
 
@@ -545,7 +546,10 @@ void AddSpritesToOamBuffer(void)
             }
             u8 prevOam = oamIndex;
             bool8 full = AddSpriteToOamBuffer(sprite, &oamIndex);
-            if (!sprite->coordOffsetEnabled)
+            /* The heal machine's balls and monitor are drawn on the machine by the 3D field (voxel_entities.c):
+             * as screen objects they flew over it in the GBA overlay. */
+            if (!sprite->coordOffsetEnabled && !FieldEffect_IsHealMachineBall(sprite)
+             && !FieldEffect_IsHealMachineMonitor(sprite))
             {
                 for (u8 k = prevOam; k < oamIndex; k++)
                     gScreenOam[k >> 5] |= (1u << (k & 31));
