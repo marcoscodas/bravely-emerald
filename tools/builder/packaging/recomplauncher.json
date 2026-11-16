@@ -3,6 +3,7 @@
   "format": 1,
   "name": "Bravely Emerald",
   "repo": "marcoscodas/bravely-emerald",
+  "requires": ["start", "setup", "makes"],
   "game": {
     "kind": "iso",
     "label": "Your own Pokémon Emerald (USA/Europe) ROM, unmodified: the .gba file, or a .zip holding it. 16 MiB, game code BPEE."

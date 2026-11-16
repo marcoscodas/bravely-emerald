@@ -2,7 +2,7 @@
 
 Pokémon Emerald, reimagined as a Square Enix HD-2D game.
 
-<a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+<p align="center"><a href="https://recompstore.com/dev/marcoscodas"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recompstore.com/assets/press/verified-light.svg"><img alt="Verified developer on RecompStore" src="https://recompstore.com/assets/press/verified-dark.svg" height="48"></picture></a></p>
 
 This is Pokémon Emerald with a lit, depth-blurred 3D diorama look, running natively on the Steam
 Deck and on Windows. It is the same game and the same saves. The decompiled game is compiled to a
