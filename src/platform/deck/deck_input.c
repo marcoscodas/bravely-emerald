@@ -182,8 +182,12 @@ void VitaInput_Poll(VitaInputState *const outState)
         currentButtons = DecodePad(sPad, &lx, &ly, &rx, &ry);
     }
     const Uint8 *kb = SDL_GetKeyboardState(NULL);
-    if (kb[SDL_SCANCODE_RETURN] || kb[SDL_SCANCODE_KP_ENTER])
+    // Alt+Enter is the fullscreen hotkey (sdl2.c eats the event), so it must not also press START.
+    const bool alt = kb[SDL_SCANCODE_LALT] || kb[SDL_SCANCODE_RALT];
+    if ((kb[SDL_SCANCODE_RETURN] && !alt) || kb[SDL_SCANCODE_KP_ENTER])
         currentButtons |= VITA_BTN_START;
+    if (kb[SDL_SCANCODE_BACKSLASH])
+        currentButtons |= VITA_BTN_SELECT;
     if (kb[SDL_SCANCODE_Z])
         currentButtons |= VITA_BTN_A;
     if (kb[SDL_SCANCODE_X])

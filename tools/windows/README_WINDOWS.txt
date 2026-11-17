@@ -13,7 +13,8 @@ RESOLUTION (window size, or the screen mode in fullscreen); both are remembered 
 userdata\settings.txt (keys fullscreen and resolution). Setting the environment variable
 DECK_FULLSCREEN=1 (or 0) forces the first start into fullscreen (or a window).
 
-Controls: keyboard and any game controller SDL supports. The settings menu of the port (WORLD >
+Controls: keyboard and any game controller SDL supports. Keyboard: arrows move, Z = A, X = B,
+Enter = START, \ = SELECT, A = L, S = R, F11 or Alt+Enter = fullscreen, Space = fast forward. The settings menu of the port (WORLD >
 EFFECTS) switches every visual effect on and off.
 
 Saves and settings (all in userdata\):
