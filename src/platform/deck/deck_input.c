@@ -181,6 +181,26 @@ void VitaInput_Poll(VitaInputState *const outState)
     {
         currentButtons = DecodePad(sPad, &lx, &ly, &rx, &ry);
     }
+    const Uint8 *kb = SDL_GetKeyboardState(NULL);
+    if (kb[SDL_SCANCODE_RETURN] || kb[SDL_SCANCODE_KP_ENTER])
+        currentButtons |= VITA_BTN_START;
+    if (kb[SDL_SCANCODE_Z])
+        currentButtons |= VITA_BTN_A;
+    if (kb[SDL_SCANCODE_X])
+        currentButtons |= VITA_BTN_B;
+    if (kb[SDL_SCANCODE_UP])
+        currentButtons |= VITA_BTN_UP;
+    if (kb[SDL_SCANCODE_DOWN])
+        currentButtons |= VITA_BTN_DOWN;
+    if (kb[SDL_SCANCODE_LEFT])
+        currentButtons |= VITA_BTN_LEFT;
+    if (kb[SDL_SCANCODE_RIGHT])
+        currentButtons |= VITA_BTN_RIGHT;
+    if (kb[SDL_SCANCODE_A])
+        currentButtons |= VITA_BTN_L;
+    if (kb[SDL_SCANCODE_S])
+        currentButtons |= VITA_BTN_R;
+
     currentButtons |= AutoplayButtons();
     sCurrentState.buttonsHeld     = currentButtons;
     sCurrentState.buttonsPressed  = currentButtons & ~sPreviousButtons;
