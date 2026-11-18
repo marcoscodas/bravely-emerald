@@ -58,8 +58,9 @@ The game runs inside the build container, so the thing to add is the launcher sc
    *Non-Steam* in the library.
 
 The launcher sets `DISPLAY`, `XAUTHORITY` and `XDG_RUNTIME_DIR` itself and starts the game in the
-container with `distrobox enter`. Starting from Game Mode has not been checked by the people who
-wrote this guide: if it does not start there, see Troubleshooting and report it.
+container with `distrobox enter`. If the build container is missing, the launcher exits with an error.
+Starting from Game Mode has not been checked by the people who wrote this guide: if it does not
+start there, see Troubleshooting and report it.
 
 ## Controls
 
@@ -122,11 +123,26 @@ and the container: `distrobox rm --force emerald-build`.
 
 ## Troubleshooting
 
-Messages that came up in real runs on a Deck:
+On desktop Linux, creating a build container requires Distrobox with `--pre-init-hooks`.
+The first `distrobox enter` runs `pacman -Syu --noconfirm` inside the new Arch container
+before Distrobox installs its basic packages. A failed upgrade stops initialization.
+The builder applies the hook only at creation and keeps existing containers.
 
-- **`distrobox create` ends with `Installing basic packages... Error: An error occurred`.** A pacman
-  mirror timed out while the container was being made. The script retries three times; if it still
-  fails, run it again later.
+- **OpenSSL dependency conflict (`libcrypto.so=3-64`) in a container created without the hook.**
+  To keep that container, choose an unused name with `--container NAME` and build again.
+- **`chpasswd: invalid password hash` during initialization.** Distrobox 1.7.0 supports the hook
+  but hit this separate error on Linux Mint 22.3. Distrobox 1.8.2.5 completed initialization
+  there. See [issue #6](https://github.com/marcoscodas/bravely-emerald/issues/6).
+
+On both desktop Linux and SteamOS:
+
+- **A container exists after a failed creation attempt.** The builder stops and keeps the container.
+  Inspect it with `podman inspect <name>`, or use an unused name with `--container NAME` to try again.
+- **Distrobox did not run the startup check.** Check the container with `distrobox list`.
+  If it disappeared, run the builder again to create the Arch container.
+- **Distrobox initialization failed.** Check the local log with
+  `podman logs --tail 100 emerald-build` (substitute your container name if needed). The builder
+  leaves the raw startup logs out of its report. If a package mirror timed out, try again later.
 - **The container will not start: `crun: open ... /containers/overlay/.../merged: Permission denied:
   OCI permission denied`.** The container storage was on the SD card. Keep Podman's storage on the
   internal disk (the default; do not add a `storage.conf` pointing at `/run/media`). Remove the broken

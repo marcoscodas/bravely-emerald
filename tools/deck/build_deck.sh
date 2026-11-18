@@ -99,25 +99,70 @@ note "repository: $REPO"
 note "install dir: $DIR, container: $CONTAINER, jobs: $JOBS"
 
 # run a command string inside the container; heavy ones at the lowest priority
-inbox() { distrobox enter --name "$CONTAINER" --no-tty -- bash -lc "$1"; }
-heavy() { distrobox enter --name "$CONTAINER" --no-tty -- nice -n 19 bash -lc "$1"; }
+enter_container() {
+    # Decline the default-image fallback if the named container disappears.
+    DBX_NON_INTERACTIVE=0 distrobox enter --name "$CONTAINER" --no-tty -- "$@" <<< n
+}
+inbox() { enter_container bash -lc "$1"; }
+heavy() { enter_container nice -n 19 bash -lc "$1"; }
+
+is_steamos() {
+    local os_release=/etc/os-release
+    [ -r "$os_release" ] || os_release=/usr/lib/os-release
+    [ -r "$os_release" ] && grep -Fxq \
+        -e 'ID=steamos' -e 'ID="steamos"' -e "ID='steamos'" \
+        -e 'VARIANT_ID=steamdeck' -e 'VARIANT_ID="steamdeck"' -e "VARIANT_ID='steamdeck'" "$os_release"
+}
+
+list_container_names() {
+    local containers
+    containers=$(distrobox list) || return
+    awk -F'|' 'NR > 1 { gsub(/ /, "", $2); print $2 }' <<<"$containers"
+}
 
 # ------------------------------------------------------------------ 2. container
 say "2/6 Build container ($CONTAINER)"
-if distrobox list 2>/dev/null | awk -F'|' 'NR > 1 { gsub(/ /, "", $2); print $2 }' | grep -qx "$CONTAINER"; then
+container_names=$(list_container_names) || die "could not list Distrobox containers. Check the output above before retrying."
+if grep -Fxq -- "$CONTAINER" <<<"$container_names"; then
     note "container exists"
 else
+    create_args=(--yes --name "$CONTAINER" --image "$IMAGE")
+    if ! is_steamos; then
+        create_help=$(distrobox create --help) || die "could not read Distrobox create options."
+        grep -Fq -- '--pre-init-hooks' <<<"$create_help" \
+            || die "creating a build container on desktop Linux requires Distrobox with --pre-init-hooks. See docs/BUILD_DECK.md."
+        # Exit the container entrypoint on failure, before Distrobox installs basic packages.
+        create_args+=(--pre-init-hooks 'pacman -Syu --noconfirm || exit')
+    fi
     note "creating it from $IMAGE (downloads about 400 MB)"
     n=0
-    until distrobox create --yes --name "$CONTAINER" --image "$IMAGE"; do
+    while :; do
+        create_status=0
+        create_output=$(distrobox create "${create_args[@]}") || create_status=$?
+        [ -z "$create_output" ] || printf '%s\n' "$create_output"
+        # Distrobox 1.x can report success for a name collision, even if list missed it.
+        if grep -Fxq -- "Distrobox named '$CONTAINER' already exists." <<<"$create_output"; then
+            die "could not create '$CONTAINER': the name is already in use. The container was kept for diagnosis."
+        fi
+        [ "$create_status" -ne 0 ] || break
+
+        container_names=$(list_container_names) || die "could not list Distrobox containers after create failed. Creation stopped."
+        if grep -Fxq -- "$CONTAINER" <<<"$container_names"; then
+            die "'$CONTAINER' exists after a failed creation attempt. The container was kept for diagnosis."
+        fi
         n=$((n + 1))
-        [ "$n" -lt 3 ] || die "distrobox create failed 3 times (see docs/BUILD_DECK.md, Troubleshooting). A pacman mirror timeout is the usual cause: run the script again."
-        note "create failed (mirror timeout?), removing the half-made container and retrying ($n/3)"
-        distrobox rm --force "$CONTAINER" >/dev/null 2>&1 || true
+        [ "$n" -lt 3 ] || die "distrobox create failed 3 times. See the output above and docs/BUILD_DECK.md, Troubleshooting."
+        note "create failed, retrying ($n/3)"
         sleep 5
     done
 fi
-inbox 'echo container-ok' >/dev/null || die "the container does not start. See docs/BUILD_DECK.md, Troubleshooting (container storage must stay on the internal disk)."
+note "checking that the build container starts"
+# Distrobox can dump raw container logs on failure. Keep them out of Builder reports.
+probe_output=$(inbox 'echo container-ok' 2>/dev/null) \
+    || die "Distrobox initialization failed for '$CONTAINER'. Inspect its local log with 'podman logs --tail 100 $CONTAINER'."
+# Declining Distrobox's creation prompt returns zero without running the command.
+grep -Fxq -- 'container-ok' <<<"$probe_output" \
+    || die "Distrobox did not run the startup check for '$CONTAINER'. Check that the container still exists."
 for p in "$REPO" "$DIR"; do
     inbox "[ -d '$p' ]" || die "$p is not visible inside the container"
 done
@@ -222,11 +267,22 @@ cat > "$LAUNCH" <<LAUNCHER
 #!/bin/sh
 # Starts Pokemon Emerald (Deck build) inside the build container. Extra arguments are KEY=VALUE
 # environment settings for the game, e.g. ./emerald-launch.sh DECK_GL_DEBUG=1
+container='$CONTAINER'
+if ! containers=\$(distrobox list); then
+    printf 'ERROR: could not list Distrobox containers. Check that Distrobox and its container engine are available.\n' >&2
+    exit 1
+fi
+if ! printf '%s\n' "\$containers" | awk -F'|' 'NR > 1 { gsub(/ /, "", \$2); print \$2 }' | grep -Fxq -- "\$container"; then
+    printf "ERROR: Build container '%s' is missing. Run the builder again.\n" "\$container" >&2
+    exit 1
+fi
 export DISPLAY="\${DISPLAY:-:0}"
 if [ -z "\${XAUTHORITY:-}" ]; then XAUTHORITY="\$(ls /run/user/\$(id -u)/xauth_* 2>/dev/null | head -1)"; export XAUTHORITY; fi
 export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
 cd '$DIST' || exit 1
-exec distrobox enter --name '$CONTAINER' --no-tty -- env "\$@" DISPLAY="\$DISPLAY" XAUTHORITY="\$XAUTHORITY" XDG_RUNTIME_DIR="\$XDG_RUNTIME_DIR" ./run.sh
+DBX_NON_INTERACTIVE=0 exec distrobox enter --name "\$container" --no-tty -- env "\$@" DISPLAY="\$DISPLAY" XAUTHORITY="\$XAUTHORITY" XDG_RUNTIME_DIR="\$XDG_RUNTIME_DIR" ./run.sh <<'DISTROBOX_INPUT'
+n
+DISTROBOX_INPUT
 LAUNCHER
 chmod +x "$LAUNCH"
 APPS="$HOME/.local/share/applications"
