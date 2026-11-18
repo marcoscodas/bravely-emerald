@@ -275,10 +275,33 @@ and `build --dry-run` against this PC and against an empty MSYS2 folder, on the 
 `tools/builder/dist-builder/` holds one (or `BRAVELY_PACKAGED_EXE` names it). A failed check prints which step and which line.
 It does not prove that a real MSYS2 install, the real mirrors or the real compile work on a clean PC: only a real run on one does.
 
-When something fails, the app's "Copy log" button copies a block for a GitHub issue: versions (app, bundled source commit), system,
-CPU, RAM, disk, MSYS2 and `pacman -Q` versions, the plan table, the full log with stdout and stderr, and at the end
-`FAILED: <step> (exit code N)` and a one-line probable cause. The same text is the log file. An error inside the app itself is written to
-`crash.log` in the app folder and shown in a box with Copy log.
+When something fails, the app's "Copy log" button copies the build log for a GitHub issue. It includes the app version, bundled
+source commit, system, CPU, RAM, disk, the plan table, and a footer with the failed step, exit code and probable cause. On Windows
+it also includes MSYS2 and `pacman -Q` versions. On desktop Linux it records the Distrobox and Podman versions when available.
+
+An error inside the app itself is written to `crash.log` in the app folder and shown in a box with Copy log.
+
+### Linux container diagnostics
+
+On desktop Linux, the graphical Builder hides raw output from the first `distrobox enter` in **Show details**,
+**Copy log** and the saved build log when using the updated build script. The Builder CLI uses the same filter.
+Running `bash tools/deck/build_deck.sh` directly leaves Distrobox's startup messages on the terminal. Some Distrobox
+versions include historical logs in those messages, so review them before sharing.
+
+If the first `enter` fails, the Builder looks up the container ID through Distrobox (up to two seconds), then asks
+Podman for up to 100 timestamped lines from that ID during the `enter` interval (up to three seconds). It uses only
+records whose timestamps fall within that interval and reports a short diagnosis. The time window filters out earlier
+attempts, but a concurrent process writing to the same container during the interval can still affect the diagnosis.
+The lookup depends on Podman and Distrobox agreeing on the container ID and on comparable timestamps.
+
+If the cause is unknown and Distrobox uses Podman, run `podman logs --tail 100 emerald-build` in a terminal, using
+the build's container name if different. This local command can show records from earlier attempts. Review the lines
+locally for private data before sharing any of them. See [the build guide](BUILD_DECK.md#troubleshooting).
+
+The Linux diagnostics integration test runs the real Bash script with local Distrobox and Podman stand-ins. It needs
+Bash and basic Linux utilities and runs without a ROM, network access, containers or administrator privileges.
+
+    python -m unittest -v tools.builder.tests.test_linux_diagnostics
 
 ## Tested and not verified
 

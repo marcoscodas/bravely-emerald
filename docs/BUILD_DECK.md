@@ -122,15 +122,28 @@ and the container: `distrobox rm --force emerald-build`.
 
 ## Troubleshooting
 
-Messages that came up in real runs on a Deck:
-
-- **`distrobox create` ends with `Installing basic packages... Error: An error occurred`.** A pacman
-  mirror timed out while the container was being made. The script retries three times; if it still
-  fails, run it again later.
-- **The container will not start: `crun: open ... /containers/overlay/.../merged: Permission denied:
-  OCI permission denied`.** The container storage was on the SD card. Keep Podman's storage on the
-  internal disk (the default; do not add a `storage.conf` pointing at `/run/media`). Remove the broken
-  container with `distrobox rm --force <name>` and run the script again.
+- **`Installing basic packages... Error: An error occurred` or `the container does not start`.**
+  These messages identify a failed first `distrobox enter`. Running `build_deck.sh` directly
+  leaves Distrobox's startup messages on the terminal, where they can include old records and private data.
+  The [desktop Linux Builder](BUILDER.md#linux-container-diagnostics) hides
+  the raw startup output with the current script and shows a short diagnosis. If Distrobox uses Podman,
+  inspect the log locally with `podman logs --tail 100 emerald-build` (use the name passed to
+  `--container` if different). Match the lines to the failed attempt and remove private data before
+  sharing them.
+- **OpenSSL dependency conflict in Arch.** A message such as `breaks dependency 'libcrypto.so=3-64'`
+  during pacman's package transaction means the installed packages and the repository need to be
+  brought into sync. A full Arch upgrade before Distrobox installs its base packages resolved
+  [the Linux Mint report](https://github.com/marcoscodas/bravely-emerald/issues/6). The Builder's
+  toolchain update happens after the first successful container start.
+- **`chpasswd: invalid password hash` during `Ensuring user's access`.** Check
+  `distrobox --version`. Distrobox 1.8.2.5 resolved this compatibility problem on Linux Mint 22.3
+  with Distrobox 1.7.0. Use a release that includes the
+  [fix for newer shadow-utils](https://github.com/89luca89/distrobox/pull/1965).
+- **An explicit download timeout, such as `Connection timed out`.** Check your connection to the
+  image registry or package mirror and try again.
+- **Podman or the OCI runtime reports `Permission denied`.** Check your rootless Podman configuration
+  and the permissions of the path in the error. On Steam Deck, if the error points to storage under
+  `/run/media`, keep Podman's storage on the internal disk (the default).
 - **`png.h: No such file` or `libpng not found` while building the host tools.** The libraries were
   still being installed or the install was interrupted. Run the script again; it installs what is missing.
 - **`ERROR: Python 3 with Pillow is needed`** from `tools/fetch_assets.sh`. The script installs

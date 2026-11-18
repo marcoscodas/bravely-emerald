@@ -111,13 +111,16 @@ else
     n=0
     until distrobox create --yes --name "$CONTAINER" --image "$IMAGE"; do
         n=$((n + 1))
-        [ "$n" -lt 3 ] || die "distrobox create failed 3 times (see docs/BUILD_DECK.md, Troubleshooting). A pacman mirror timeout is the usual cause: run the script again."
-        note "create failed (mirror timeout?), removing the half-made container and retrying ($n/3)"
+        [ "$n" -lt 3 ] || die "distrobox create failed 3 times. See the output above and docs/BUILD_DECK.md, Troubleshooting."
+        note "create failed, removing the half-made container and retrying ($n/3)"
         distrobox rm --force "$CONTAINER" >/dev/null 2>&1 || true
         sleep 5
     done
 fi
-inbox 'echo container-ok' >/dev/null || die "the container does not start. See docs/BUILD_DECK.md, Troubleshooting (container storage must stay on the internal disk)."
+note "checking that the build container starts${EPOCHREALTIME:+ [$EPOCHREALTIME]}"
+inbox 'echo container-ok' >/dev/null ||
+    die "the container does not start. See docs/BUILD_DECK.md, Troubleshooting.${EPOCHREALTIME:+ [$EPOCHREALTIME]}"
+note "build container started"
 for p in "$REPO" "$DIR"; do
     inbox "[ -d '$p' ]" || die "$p is not visible inside the container"
 done
