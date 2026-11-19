@@ -1,19 +1,24 @@
 """Tests of the UI-agnostic core. Run: python -m unittest discover -s tools/builder/tests -v
 No ROM, network or build tools are needed (a synthetic ROM header is made in a temp folder)."""
+import io
 import os
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BRAVELY_BUILDER_HOME", tempfile.mkdtemp(prefix="bb-settings-"))
 
 from core import Builder, explain, validate_rom, clean_path, load_settings, save_settings    # noqa: E402
+from core.errors import container_hint                                                      # noqa: E402
 from core.host import detect_host                                                           # noqa: E402
+from core.probe import linux_tool_version, podman_logs                                       # noqa: E402
 from core.repo import is_repo, guess_repo                                                   # noqa: E402
-from core.tasks import Step                                                                 # noqa: E402
+from core.tasks import Step, Task                                                           # noqa: E402
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
@@ -105,13 +110,12 @@ class HostTests(unittest.TestCase):
 
 class ErrorTableTests(unittest.TestCase):
     CASES = {
-        "crun: open /x/containers/overlay/y/merged: Permission denied: OCI permission denied": "storage on the SD card",
-        "Installing basic packages... Error: An error occurred": "mirror timed out",
         "No protocol specified": "X display",
         "ERROR: Python 3 with Pillow is needed": "Pillow",
         "fatal: png.h: No such file": "libpng",
         "ERROR: not a Pokemon Emerald dump (size 5 bytes, expected 16 MB)": "ROM was rejected",
         "ERROR: no internet (github.com unreachable)": "download failed",
+        "error: failed retrieving file 'msys.db': Connection timed out": "download failed",
         "ERROR: mingw-w64-i686-toolchain missing: pacman -S mingw-w64-i686-toolchain": "toolchain packages",
         "ERROR: the repository path contains a space; move it": "contains a space",
         "ERROR: less than 4000 MB free in /x": "disk space",
@@ -126,6 +130,158 @@ class ErrorTableTests(unittest.TestCase):
 
     def test_unknown_is_empty(self):
         self.assertEqual(explain(["all fine", "done"]), [])
+
+
+class LinuxDiagnosticsTests(unittest.TestCase):
+    OPENSSL = ":: installing openssl (4.1.0-1)\nbreaks dependency 'libcrypto.so=3-64' required by pacman"
+    CHPASSWD = "chpasswd: (line 1, user private-user)\n\ninvalid password hash"
+    TIMEOUT = "error: failed retrieving file 'core.db' from mirror: Connection timed out"
+    PERMISSIONS = "Error: crun: open /home/private-user/containers/overlay/x/merged: Permission denied"
+    GENERIC = "\x1b[31mInstalling basic packages... Error: An error occurred\x1b[0m"
+    START_CHECK = "    checking that the build container starts [100.123456]"
+    ENTER_FAILED = "ERROR: the container does not start. See docs/BUILD_DECK.md, Troubleshooting. [101.234567]"
+    CONTAINER_ID = "1a2b3c4d5e6f"
+
+    def test_specific_causes_take_priority(self):
+        for error, expected in ((self.OPENSSL, "OpenSSL dependency conflict"),
+                                ("error: breaks dependency 'libcrypto.so=3-64' required by pacman", "OpenSSL dependency conflict"),
+                                (self.CHPASSWD, "invalid password hash"),
+                                ("chpasswd: invalid password hash", "invalid password hash"),
+                                (self.TIMEOUT, "network operation timed out"),
+                                (self.PERMISSIONS, "container permission error")):
+            with self.subTest(expected=expected, error=error):
+                extra = [self.TIMEOUT] if error in (self.OPENSSL, self.CHPASSWD) else []
+                hit = container_hint(extra + [self.GENERIC, error, self.ENTER_FAILED])
+                self.assertIn(expected, hit["title"])
+                self.assertNotIn("private-user", str(hit))
+
+    def test_generic_messages_are_not_evidence(self):
+        self.assertIsNone(container_hint([self.GENERIC, self.ENTER_FAILED,
+                                         "Ensuring user's access... Error: An error occurred",
+                                         "ERROR: distrobox create failed 3 times",
+                                         "looking at containers/overlay",
+                                         "+ printf 'chpasswd: invalid password hash'"]))
+
+    def _failed_build(self, output, side_effect, host="linux"):
+        b = Builder(REPO)
+        b.host = {"kind": host}
+        step = Step("tools/deck/build_deck.sh", "prereq", ["bash", "tools/deck/build_deck.sh"],
+                    stage_rules=[(r"^=== 2/6", "container")])
+        proc = mock.Mock(stdout=io.BytesIO(output.encode()), returncode=1)
+        with tempfile.TemporaryDirectory() as directory:
+            log = os.path.join(directory, "build.log")
+            task = Task("build", "Build", ["prereq", "container"], logfile=log)
+            task.meta = {"target": "linux32", "container": "custom-build"}
+            with mock.patch.object(b, "_spawn", return_value=(proc, step.argv)), \
+                    mock.patch("core.builder.report.header", return_value=["Builder"]), \
+                    mock.patch("core.probe.subprocess.run", side_effect=side_effect) as run:
+                b._run(task, [step])
+            with open(log, encoding="utf-8") as f:
+                log_text = f.read()
+        self.assertEqual(task.state, "failed")
+        self.assertEqual(task.final.get("code"), 1)
+        cause = task.hints[0]["title"] if task.hints else "unknown"
+        self.assertIn("Probable cause: " + cause, log_text)
+        return task, log_text, run
+
+    def test_failed_enter_recovers_only_a_diagnosis_from_podman(self):
+        def probe(argv, **kwargs):
+            if argv == ["distrobox", "--version"]:
+                return subprocess.CompletedProcess(argv, 0, "distrobox: 1.7.0\n")
+            if argv == ["podman", "--version"]:
+                return subprocess.CompletedProcess(argv, 0, "podman version 4.9.3\n")
+            if argv == ["distrobox", "list"]:
+                listing = "ID | NAME | STATUS | IMAGE\n%s | custom-build | Exited | archlinux\n" % self.CONTAINER_ID
+                return subprocess.CompletedProcess(argv, 0, listing)
+            messages = ["+ printf PRIVATE_PASSWORD"] + self.CHPASSWD.splitlines()
+            log = "\n".join("1970-01-01T00:01:40.500000000Z " + line for line in messages)
+            return subprocess.CompletedProcess(argv, 0, log)
+
+        output = "\n".join(["=== 2/6 Build container ===", self.TIMEOUT,
+                            self.START_CHECK, self.GENERIC,
+                            "+ printf PRIVATE_TRACE", self.ENTER_FAILED])
+        task, log, run = self._failed_build(output, probe)
+        self.assertIn("invalid password hash", task.hints[0]["title"])
+        self.assertIn("Distrobox: 1.7.0\nPodman: 4.9.3", log)
+        self.assertNotIn("PRIVATE_", log)
+        self.assertNotIn("private-user", log)
+        args, kwargs = run.call_args
+        self.assertEqual(args[0][:3], ["podman", "logs", "--since"])
+        self.assertEqual(datetime.fromisoformat(args[0][3]).timestamp(), 100.123456)
+        self.assertEqual(args[0][4], "--until")
+        self.assertEqual(datetime.fromisoformat(args[0][5]).timestamp(), 101.234567)
+        self.assertEqual(args[0][6:], ["--timestamps", "--tail", "100", "--", self.CONTAINER_ID])
+        self.assertEqual(kwargs["timeout"], 3)
+        self.assertEqual(kwargs["stderr"], subprocess.STDOUT)
+
+    def test_missing_diagnostics_keep_generic_failure(self):
+        output = "\n".join(["=== 2/6 Build container ===", self.START_CHECK, self.GENERIC, self.ENTER_FAILED])
+        for exception in (FileNotFoundError(), subprocess.TimeoutExpired("podman", 3)):
+            with self.subTest(exception=type(exception)):
+                task, _, _ = self._failed_build(output, exception)
+                self.assertIn("unknown reason", task.hints[0]["title"])
+                self.assertIn("podman logs --tail 100 custom-build", task.hints[0]["fix"])
+
+    def test_distrobox_historical_dump_is_neither_shown_nor_classified(self):
+        output = "\n".join(["=== 2/6 Build container ===", self.TIMEOUT, self.START_CHECK,
+                            "\x1b[31m Error: could not start entrypoint.",
+                            self.OPENSSL, "+ printf PRIVATE_PASSWORD", self.ENTER_FAILED])
+        task, log, run = self._failed_build(output, FileNotFoundError())
+        self.assertIn("unknown reason", task.hints[0]["title"])
+        self.assertNotIn("PRIVATE_PASSWORD", log)
+        self.assertNotIn("libcrypto", log)
+        self.assertEqual(run.call_args.args[0], ["distrobox", "list"])
+
+    def test_entrypoint_message_during_create_leaves_final_error_visible(self):
+        create_error = "ERROR: distrobox create failed 3 times"
+        output = "\n".join(["=== 2/6 Build container ===", "Error: could not start entrypoint.", create_error])
+        task, log, run = self._failed_build(output, FileNotFoundError())
+        self.assertIn(create_error, log)
+        self.assertIn("unknown reason", task.hints[0]["title"])
+        self.assertEqual([call.args[0][-1] for call in run.call_args_list], ["--version", "--version"])
+
+    def test_other_failure_phases_do_not_read_podman_logs(self):
+        for error in ("ERROR: distrobox create failed 3 times", "ERROR: package install failed"):
+            with self.subTest(error=error):
+                _, _, run = self._failed_build(
+                    "=== 2/6 Build container ===\n" + self.PERMISSIONS + "\n" + error, FileNotFoundError())
+                self.assertEqual([call.args[0][-1] for call in run.call_args_list], ["--version", "--version"])
+
+    def test_steamos_does_not_run_extra_commands(self):
+        task, _, run = self._failed_build(
+            "=== 2/6 Build container ===\n" + self.PERMISSIONS + "\n" + self.ENTER_FAILED,
+            AssertionError("unexpected probe"), host="steamos")
+        self.assertIn("container permission error", task.hints[0]["title"])
+        run.assert_not_called()
+
+    def test_probe_failures_cannot_supply_a_diagnosis(self):
+        with mock.patch("core.probe.subprocess.run", side_effect=[
+                subprocess.CompletedProcess(["distrobox", "list"], 0, "%s | custom-build | Exited" % self.CONTAINER_ID),
+                subprocess.CompletedProcess(["podman"], 125, self.PERMISSIONS),
+                subprocess.CompletedProcess(["podman"], 125, self.PERMISSIONS)]) as run:
+            self.assertEqual(podman_logs("custom-build", 0, 1), [])
+            self.assertIsNone(linux_tool_version("podman"))
+            self.assertEqual(podman_logs("--latest", 0, 1), [])
+            self.assertEqual(run.call_count, 3)
+
+    def test_unidentified_distrobox_container_skips_podman(self):
+        listing = "ID | NAME | STATUS\n%s | unrelated-build | Exited\n" % self.CONTAINER_ID
+        with mock.patch("core.probe.subprocess.run", return_value=subprocess.CompletedProcess(
+                ["distrobox", "list"], 0, listing)) as run:
+            self.assertEqual(podman_logs("custom-build", 0, 1), [])
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(run.call_args.args[0], ["distrobox", "list"])
+
+    def test_colored_distrobox_listing_preserves_container_id(self):
+        listing = ("ID | NAME | STATUS\n"
+                   "\x1b[33m%s | \x1b[1mcustom-build\x1b[0m | Exited\x1b[0m\n" % self.CONTAINER_ID)
+        message = "chpasswd: invalid password hash"
+        log = "1970-01-01T00:00:00.500000000Z " + message
+        with mock.patch("core.probe.subprocess.run", side_effect=[
+                subprocess.CompletedProcess(["distrobox", "list"], 0, listing),
+                subprocess.CompletedProcess(["podman", "logs"], 0, log)]) as run:
+            self.assertEqual(podman_logs("custom-build", 0, 1), [message])
+            self.assertEqual(run.call_args.args[0][-1], self.CONTAINER_ID)
 
 
 class SettingsTests(unittest.TestCase):

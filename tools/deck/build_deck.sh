@@ -156,13 +156,14 @@ else
         sleep 5
     done
 fi
-note "checking that the build container starts"
+note "checking that the build container starts${EPOCHREALTIME:+ [$EPOCHREALTIME]}"
 # Distrobox can dump raw container logs on failure. Keep them out of Builder reports.
 probe_output=$(inbox 'echo container-ok' 2>/dev/null) \
-    || die "Distrobox initialization failed for '$CONTAINER'. Inspect its local log with 'podman logs --tail 100 $CONTAINER'."
+    || die "the container does not start. Distrobox initialization failed for '$CONTAINER'. Inspect its local log with 'podman logs --tail 100 $CONTAINER'.${EPOCHREALTIME:+ [$EPOCHREALTIME]}"
 # Declining Distrobox's creation prompt returns zero without running the command.
 grep -Fxq -- 'container-ok' <<<"$probe_output" \
     || die "Distrobox did not run the startup check for '$CONTAINER'. Check that the container still exists."
+note "build container started"
 for p in "$REPO" "$DIR"; do
     inbox "[ -d '$p' ]" || die "$p is not visible inside the container"
 done

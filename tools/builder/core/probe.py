@@ -4,8 +4,71 @@ import glob
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 
-from .constants import MSYS_PACKAGES, SDL2_VERSION, SDL2_IMAGE_VERSION, MSYS_DEFAULT_ROOT
+from .constants import CONTAINER_RE, MSYS_PACKAGES, SDL2_VERSION, SDL2_IMAGE_VERSION, MSYS_DEFAULT_ROOT
+from .errors import ANSI_ESCAPE
+
+
+def linux_tool_version(tool):
+    """Read only the version field, since a tool can also print warnings."""
+    try:
+        p = subprocess.run([tool, "--version"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode != 0:
+        return None
+    version = re.search(r"^(?:" + re.escape(tool) + r"(?: version)?[: \t]+)?v?"
+                        r"(\d+\.\d+(?:\.\d+){0,2}(?:[~+.-][\da-zA-Z][\da-zA-Z.+~-]*)?)[ \t]*$",
+                        p.stdout, re.M)
+    return version.group(1) if version else None
+
+
+DISTROBOX_ID = re.compile(r"[0-9a-f]{12,64}")
+PODMAN_TIMESTAMP = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d{1,9}))?(Z|[+-]\d\d:\d\d)")
+
+
+def podman_logs(container, started, finished):
+    """Read timestamped Podman records for this Distrobox container during the first enter."""
+    if not CONTAINER_RE.fullmatch(container) or started >= finished:
+        return []
+    since = datetime.fromtimestamp(started, timezone.utc).isoformat()
+    until = datetime.fromtimestamp(finished, timezone.utc).isoformat()
+    try:
+        listing = subprocess.run(["distrobox", "list"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, encoding="utf-8", errors="replace", timeout=2)
+        if listing.returncode != 0:
+            return []
+        rows = [row.split("|", 2) for row in ANSI_ESCAPE.sub("", listing.stdout).splitlines()]
+        ids = [row[0].strip() for row in rows if len(row) == 3 and row[1].strip() == container]
+        if len(ids) != 1 or not DISTROBOX_ID.fullmatch(ids[0]):
+            return []
+        # Use Distrobox's ID instead of opening a different backend's container with the same name.
+        p = subprocess.run(["podman", "logs", "--since", since, "--until", until, "--timestamps",
+                            "--tail", "100", "--", ids[0]],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           encoding="utf-8", errors="replace", timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if p.returncode != 0:
+        return []
+    messages = []
+    # Recheck timestamps to exclude out-of-window records and unstructured tool diagnostics.
+    for line in p.stdout.splitlines()[-100:]:
+        timestamp, _, message = line.partition(" ")
+        match = PODMAN_TIMESTAMP.fullmatch(timestamp)
+        if not match:
+            continue
+        date, fraction, offset = match.groups()
+        micros = (fraction or "").ljust(6, "0")[:6]
+        try:
+            when = datetime.fromisoformat(date + "." + micros + offset.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        if started <= when < finished:
+            messages.append(message)
+    return messages
 
 
 def find_msys_root(setting=None, env=None):

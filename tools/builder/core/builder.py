@@ -12,14 +12,24 @@ import urllib.request
 
 from .constants import (DOWNLOAD_MB, SDL2_VERSION, SDL2_IMAGE_VERSION, MSYS_PACKAGES, MSYS_INSTALLER_URL, MSYS_INSTALLER_FILE, MIN_FREE_GB, HARD_MIN_FREE_GB,
                         CONTAINER_RE)
-from .errors import explain
+from .errors import container_hint, explain
 from .host import detect_host
 from . import report
-from .probe import Probe, find_msys_root
+from .probe import Probe, find_msys_root, linux_tool_version, podman_logs
 from .repo import is_repo
 from .settings import load_settings
 from .tasks import Step, Task, kill_tree
 from .validate import source_path_problem, clean_path, validate_rom, free_gb, network_ok, fmt_secs, sha256_file
+
+CONTAINER_START_CHECK = "    checking that the build container starts"
+CONTAINER_STARTED = "    build container started"
+CONTAINER_START_FAILED = "ERROR: the container does not start."
+CONTAINER_TIMESTAMP = re.compile(r" \[([0-9]{1,10}[.,][0-9]{6})\]$")
+
+
+def _container_time(line):
+    timestamp = CONTAINER_TIMESTAMP.search(line)
+    return float(timestamp[1].replace(",", ".")) if timestamp else None
 
 
 class Builder:
@@ -432,7 +442,8 @@ class Builder:
         ]
         stages = ["prereq", "container", "deps", "files", "compile", "link", "package"] + (["test"] if opts.get("run_test") else [])
         steps = [Step("tools/deck/build_deck.sh", "prereq", argv, {}, stage_rules=rules)]
-        meta = {"target": "linux32", "dir": d, "logdir": os.path.join(d, "builder-logs"), "low": low}
+        meta = {"target": "linux32", "dir": d, "logdir": os.path.join(d, "builder-logs"), "low": low,
+                "container": container}
         return "Linux / Steam Deck build", stages, steps, meta
 
     # ----- repository
@@ -482,6 +493,11 @@ class Builder:
             if task.kind == "build":
                 for ln in report.header(self, self.manifest):
                     task.log(ln)
+                if self._is_desktop_linux_build(task) and not self.dry_run:
+                    for tool, label in (("distrobox", "Distrobox"), ("podman", "Podman")):
+                        version = linux_tool_version(tool)
+                        if version:
+                            task.log("%s: %s" % (label, version))
                 task.log("")
             task.log("# %s, started %s%s" % (task.label, time.strftime("%Y-%m-%d %H:%M:%S"), "  [DRY RUN: nothing is executed]" if self.dry_run else ""))
             if steps and isinstance(steps[0], tuple):          # the MSYS2 installer download
@@ -518,7 +534,9 @@ class Builder:
                 if task.cancel_requested:
                     break
                 if rc != 0 and not (step.tolerate and step.tolerate(lines)):
-                    hints = explain(tail)
+                    hints = self._failure_hints(task, lines, tail)
+                    if task.cancel_requested:
+                        break
                     task.hints = hints
                     task.finish("failed", hints=hints, code=rc, step=step.name)
                     return
@@ -540,6 +558,39 @@ class Builder:
             task.log("INTERNAL ERROR: %r" % (e,))
             task.finish("failed", hints=[{"title": "Internal error in the builder.", "fix": repr(e)}])
 
+    def _is_desktop_linux_build(self, task):
+        return self.host["kind"] == "linux" and task.meta.get("target") == "linux32"
+
+    def _failure_hints(self, task, lines, tail):
+        if task.meta.get("target") != "linux32" or task.stage != "container":
+            return explain(tail)
+        recent = lines[-300:]
+        enter_failure = next((line for line in reversed(recent) if line.startswith(CONTAINER_START_FAILED)), "")
+        start_marker = CONTAINER_START_CHECK if enter_failure else CONTAINER_STARTED
+        start_index = next((i for i in range(len(lines) - 1, -1, -1) if lines[i].startswith(start_marker)), None)
+        container = task.meta.get("container") or "emerald-build"
+        if start_index is not None:
+            recent = lines[max(start_index + 1, len(lines) - 300):]
+        if enter_failure and self._is_desktop_linux_build(task):
+            if start_index is None:
+                # An older script can mix errors from create and enter in the same stage.
+                recent = []
+            else:
+                started = _container_time(lines[start_index])
+                finished = _container_time(enter_failure)
+                if started is not None and finished is not None:
+                    recent += podman_logs(container, started, finished)
+
+        hint = container_hint(recent)
+        if hint:
+            return [hint]
+        if enter_failure or any(line.startswith("ERROR: distrobox create failed") for line in recent):
+            name = container if CONTAINER_RE.fullmatch(container) else "CONTAINER_NAME"
+            return [{"title": "The build container failed for an unknown reason.",
+                     "fix": "If Distrobox uses Podman, run 'podman logs --tail 100 %s' in a terminal to inspect the log locally. "
+                            "Review the output for private information before sharing any lines." % name}]
+        return explain(tail)
+
     RETRY_RE = re.compile(r"failed retrieving file|Operation too slow|Connection timed out|Could not resolve host|"
                           r"error: failed to (retrieve|commit)|download library error|SSL connect error|Connection reset|"
                           r"unable to lock database|Maximum file size exceeded|curl: \(\d+\)", re.I)
@@ -547,6 +598,7 @@ class Builder:
     def _run_proc(self, task, step, low, tail):
         """Run one subprocess step, retrying up to step.retries times when the output shows a network or mirror problem.
         Returns (exit code, lines); (None, []) when the program could not be started (the task is finished as failed)."""
+        desktop_linux = self._is_desktop_linux_build(task)
         for attempt in range(step.retries + 1):
             try:
                 proc, real = self._spawn(step, low)
@@ -556,9 +608,28 @@ class Builder:
                 return None, []
             task.proc = proc
             lines = []
+            hide_container_output = False
+            skip_entrypoint_dump = False
             for raw in iter(proc.stdout.readline, b""):
                 line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                if desktop_linux and task.stage == "container":
+                    if line == CONTAINER_STARTED or line.startswith(CONTAINER_START_FAILED):
+                        hide_container_output = skip_entrypoint_dump = False
+                    elif skip_entrypoint_dump:
+                        continue
+                    elif hide_container_output and "Error: could not start entrypoint." in line:
+                        # Distrobox dumps all historical Podman logs here, without a time or line limit.
+                        task.log("Distrobox could not start the container entrypoint.")
+                        skip_entrypoint_dump = True
+                        continue
+                    elif line.startswith(CONTAINER_START_CHECK):
+                        task.log(line)
+                        hide_container_output = True
+                        lines.append(line)
+                        continue
                 lines.append(line)
+                if hide_container_output:
+                    continue
                 tail.append(line)
                 if len(tail) > 600:
                     del tail[:200]

@@ -134,6 +134,9 @@ The builder applies the hook only at creation and keeps existing containers.
   but hit this separate error on Linux Mint 22.3. Distrobox 1.8.2.5 completed initialization
   there. See [issue #6](https://github.com/marcoscodas/bravely-emerald/issues/6).
 
+The [desktop Linux Builder](BUILDER.md#linux-container-diagnostics) shows a short diagnosis of these
+failures and keeps the raw startup output out of its report.
+
 On both desktop Linux and SteamOS:
 
 - **A container exists after a failed creation attempt.** The builder stops and keeps the container.
@@ -147,6 +150,8 @@ On both desktop Linux and SteamOS:
   OCI permission denied`.** The container storage was on the SD card. Keep Podman's storage on the
   internal disk (the default; do not add a `storage.conf` pointing at `/run/media`). Remove the broken
   container with `distrobox rm --force <name>` and run the script again.
+- **An explicit download timeout, such as `Connection timed out`.** Check your connection to the
+  image registry or package mirror and try again.
 - **`png.h: No such file` or `libpng not found` while building the host tools.** The libraries were
   still being installed or the install was interrupted. Run the script again; it installs what is missing.
 - **`ERROR: Python 3 with Pillow is needed`** from `tools/fetch_assets.sh`. The script installs

@@ -61,13 +61,21 @@ Linux: in your install folder). **Settings** shows the exact place.
 ## If something goes wrong
 
 The program shows a short explanation and a suggested fix. Press **Try again** to continue where it stopped: finished
-steps are skipped. **Show details** shows the full log, and **Copy log** puts it on the clipboard.
+steps are skipped. **Show details** shows the build log, and **Copy log** puts it on the clipboard. On desktop Linux,
+the Builder hides the raw container startup output with the current build script. Running the Bash script directly
+leaves Distrobox's startup messages on the terminal.
 
 Common problems:
 
-* **The container will not start (Linux, Steam Deck).** The container storage was on the SD card. Keep Podman storage on the
-  internal disk, remove the broken container with `distrobox rm --force <name>`, and try again.
-* **A package mirror timed out.** Try again later.
+* **The build container failed for an unknown reason.** If Distrobox uses Podman, run `podman logs --tail 100 emerald-build`
+  in a terminal and substitute your container name if different. Inspect the failed attempt locally and remove private
+  data before sharing any lines. The Builder does not copy the output of this command into its report.
+* **Arch Linux reports an OpenSSL dependency conflict.** The installed packages and the Arch repositories need to be in sync.
+* **Distrobox reports `chpasswd: invalid password hash`.** Check `distrobox --version`. Distrobox 1.8.2.5 resolved this
+  problem on Linux Mint 22.3.
+* **A network operation timed out.** Check your connection to the image registry or package mirror and try again.
+* **Podman or its runtime reports a permissions error.** Check your rootless Podman configuration and the reported path.
+  On Steam Deck, keep Podman's storage on the internal disk if the error points to external storage.
 * **No picture or no display when started over SSH.** Start the program from a terminal on the desktop instead.
 * **Not enough disk space.** Free some space or choose another install folder in Settings.
 * **A download failed.** Check the internet connection and try again.

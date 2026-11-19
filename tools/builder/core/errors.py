@@ -4,13 +4,6 @@ import re
 # Known failures: pattern in the log -> (title, fix). Sources: docs/BUILD_DECK.md Troubleshooting,
 # docs/WINDOWS_BUILD.md, and the messages of the scripts themselves.
 KNOWN_ERRORS = [
-    (r"OCI permission denied|crun: open .*merged|containers/overlay",
-     "The build container will not start (storage on the SD card).",
-     "Keep Podman's storage on the internal disk (do not point storage.conf at /run/media). Remove the broken "
-     "container with 'distrobox rm --force <name>' and start the build again."),
-    (r"Installing basic packages.*Error|distrobox create failed",
-     "A package mirror timed out while the container was being created.",
-     "This is usually temporary. Start the build again later; the script retries three times by itself."),
     (r"No protocol specified|[Cc]an'?t open display|cannot open display|no display|XAUTHORITY",
      "No X display or X authority (typical when started over SSH).",
      "Start the builder from a terminal inside Desktop Mode, or untick the start-up test. The game launcher "
@@ -55,9 +48,6 @@ KNOWN_ERRORS = [
     (r"distrobox not found|podman not found",
      "distrobox or podman is missing.",
      "SteamOS ships both. On another distribution install them with the package command in the Prerequisites panel."),
-    (r"the container does not start",
-     "The container does not start.",
-     "See the first entry (storage on the SD card), then 'distrobox rm --force <name>' and retry."),
     (r"sudo: a password is required|sudo: no tty present|a terminal is required",
      "A command needs your administrator password.",
      "The builder never asks for or stores passwords. Run the command shown in the log in a terminal yourself, then press Start build again."),
@@ -69,6 +59,44 @@ KNOWN_ERRORS = [
      "Press Start build again: finished files are kept and often a leftover from an interrupted run is the cause. "
      "If the same error repeats, copy the first error lines of the log into a bug report."),
 ]
+
+CONTAINER_ERRORS = [
+    (r"\binstalling\s+(?:lib32-)?openssl(?:\s+\([^\n)]+\))?\s+breaks\s+dependency\b|"
+     r"\b(?:breaks\s+dependency|could not satisfy\s+dependency|requires)\s+['\"]?"
+     r"(?:(?:libcrypto|libssl)\.so\b|openssl[=<>])",
+     "Arch Linux reported an OpenSSL dependency conflict in the build container.",
+     "The installed packages and Arch repositories need to be in sync. See OpenSSL in the build guide's "
+     "Troubleshooting section."),
+    (r"\bchpasswd:[^\n]*(?:\n[ \t]*)*invalid password hash\b",
+     "Distrobox could not set up user access (chpasswd: invalid password hash).",
+     "Check 'distrobox --version'. Distrobox 1.8.2.5 resolved this error on Linux Mint 22.3. "
+     "Use a version that includes the fix for newer shadow-utils."),
+    (r"(?:\b(?:podman|crun|runc|newuidmap|newgidmap)\b|containers/(?:storage|overlay))[^\n]*"
+     r"(?:permission denied|operation not permitted)|\bOCI permission denied\b|"
+     r"(?:permission denied|operation not permitted)[^\n]*\bpodman\b",
+     "Podman or its OCI runtime reported a container permission error.",
+     "Check the reported path and your user's rootless Podman permissions. If the error points to external "
+     "storage on a Steam Deck, check the Podman storage location in the build guide."),
+    (r"\b(?:connection|TLS handshake) timed out\b|\bi/o timeout\b|\boperation too slow\b|"
+     r"\bcurl:\s*\(28\)|\bclient\.timeout exceeded\b|(?:download|retrieving file)[^\n]*\b(?:timed out|timeout)\b",
+     "A network operation timed out while setting up the build container.",
+     "Check the connection to the image registry or Arch package mirror and try again."),
+    (r"\bcould not resolve host\b|\bfailed to connect\b|\bconnection reset\b",
+     "A network connection failed while setting up the build container.",
+     "Check the connection and name resolution for the image registry or package mirror and try again."),
+]
+
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def container_hint(lines):
+    """Return a fixed diagnosis without copying any content from the container log."""
+    text = ANSI_ESCAPE.sub("", "\n".join(lines))
+    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("+"))
+    for pat, title, fix in CONTAINER_ERRORS:
+        if re.search(pat, text, re.I):
+            return {"title": title, "fix": fix}
+    return None
 
 
 def explain(lines):
