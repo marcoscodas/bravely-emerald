@@ -114,6 +114,23 @@ is_steamos() {
         -e 'VARIANT_ID=steamdeck' -e 'VARIANT_ID="steamdeck"' -e "VARIANT_ID='steamdeck'" "$os_release"
 }
 
+MIN_DISTROBOX=1.8.2.5
+
+# version_older A B: true when dotted version A is older than B; false when A is empty or not a plain version
+version_older() {
+    local a=$1 b=$2 i x y
+    [[ $a =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+    local -a av bv
+    IFS=. read -ra av <<<"$a"
+    IFS=. read -ra bv <<<"$b"
+    for i in 0 1 2 3; do
+        x=${av[i]:-0}
+        y=${bv[i]:-0}
+        [ "$((10#$x))" -eq "$((10#$y))" ] || { [ "$((10#$x))" -lt "$((10#$y))" ]; return; }
+    done
+    return 1
+}
+
 list_container_names() {
     local containers
     containers=$(distrobox list) || return
@@ -128,6 +145,13 @@ if grep -Fxq -- "$CONTAINER" <<<"$container_names"; then
 else
     create_args=(--yes --name "$CONTAINER" --image "$IMAGE")
     if ! is_steamos; then
+        # Distrobox before 1.8.2.5 cannot set up a user inside a current Arch image (chpasswd: invalid password hash).
+        dbx_version=
+        dbx_out=$(distrobox --version 2>/dev/null) || true
+        [[ $dbx_out =~ ([0-9]+(\.[0-9]+)*) ]] && dbx_version=${BASH_REMATCH[1]}
+        if version_older "$dbx_version" "$MIN_DISTROBOX"; then
+            die "Distrobox $dbx_version is too old to set up the Arch container (chpasswd: invalid password hash). Install Distrobox $MIN_DISTROBOX or newer, then run the builder again. See docs/BUILD_DECK.md, Troubleshooting."
+        fi
         create_help=$(distrobox create --help) || die "could not read Distrobox create options."
         grep -Fq -- '--pre-init-hooks' <<<"$create_help" \
             || die "creating a build container on desktop Linux requires Distrobox with --pre-init-hooks. See docs/BUILD_DECK.md."

@@ -130,9 +130,13 @@ The builder applies the hook only at creation and keeps existing containers.
 
 - **OpenSSL dependency conflict (`libcrypto.so=3-64`) in a container created without the hook.**
   To keep that container, choose an unused name with `--container NAME` and build again.
-- **`chpasswd: invalid password hash` during initialization.** Distrobox 1.7.0 supports the hook
-  but hit this separate error on Linux Mint 22.3. Distrobox 1.8.2.5 completed initialization
-  there. See [issue #6](https://github.com/marcoscodas/bravely-emerald/issues/6).
+- **`Distrobox X is too old to set up the Arch container`, or `chpasswd: invalid password hash`
+  during initialization.** Distrobox before 1.8.2.5 (Ubuntu 24.04 and Linux Mint 22 ship 1.7.0) cannot
+  set up a user in a current Arch image, because newer `shadow-utils` rejects what its setup script does
+  ([fixed upstream](https://github.com/89luca89/distrobox/pull/1965)). The script now stops before
+  creating the container when it finds an older version. Install Distrobox 1.8.2.5 or newer
+  (see [distrobox.it](https://distrobox.it)), then run the builder again.
+  See [issue #6](https://github.com/marcoscodas/bravely-emerald/issues/6).
 
 The [desktop Linux Builder](BUILDER.md#linux-container-diagnostics) shows a short diagnosis of these
 failures and keeps the raw startup output out of its report.

@@ -14,6 +14,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "deck" / "build_deck.sh"
 BASH = shutil.which("bash")
 
 DISTROBOX = r"""
+if [[ $1 == --version ]]; then echo "distrobox: $STUB_VERSION"; exit 0; fi
 printf '%s\n' "$*" >> "$STUB_DIR/calls"
 container="$STUB_DIR/container"
 case "$1" in
@@ -214,7 +215,7 @@ class DeckContainerTests(unittest.TestCase):
                 self.assertTrue(any("pacman -Syu --noconfirm && pacman -S --needed" in call for call in calls[4:]))
 
     def test_pre_init_failure_stops_before_basic_packages(self):
-        for version in ("1.7.0", "1.8.2.5"):
+        for version in ("1.8.2.5", "1.8.3"):
             with self.subTest(version=version):
                 result, calls = self.run_builder(version=version, failure="upgrade")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -228,12 +229,27 @@ class DeckContainerTests(unittest.TestCase):
                 self.assertEqual(len(calls), 5, calls)
                 self.assertEqual(calls[-1], "pacman -Syu --noconfirm")
 
-    def test_v170_accepts_hook_before_separate_chpasswd_failure(self):
-        result, calls = self.run_builder(version="1.7.0", failure="chpasswd")
+    def test_chpasswd_failure_still_reports_the_local_log(self):
+        result, calls = self.run_builder(version="1.8.2.5", failure="chpasswd")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("podman logs --tail 100 emerald-build", result.stderr)
         self.assertNotIn("chpasswd: invalid password hash", result.stdout + result.stderr)
         self.assertEqual(calls[4:], ["pacman -Syu --noconfirm", "basic packages"])
+
+    def test_old_distrobox_stops_before_creating_a_container(self):
+        for version in ("1.7.0", "1.8.2.4"):
+            with self.subTest(version=version):
+                result, calls = self.run_builder(version=version)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("Distrobox %s is too old" % version, result.stderr)
+                self.assertIn("Install Distrobox 1.8.2.5 or newer", result.stderr)
+                self.assertEqual(calls, ["list"])
+
+    def test_old_distrobox_does_not_block_steamos_or_existing_containers(self):
+        for kwargs in ({"os_release": "ID=steamos"}, {"existing": True}):
+            with self.subTest(**kwargs):
+                result, calls = self.run_builder(version="1.7.0", **kwargs)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_new_desktop_container_requires_hook_support(self):
         result, calls = self.run_builder(version="legacy")
@@ -262,7 +278,7 @@ class DeckContainerTests(unittest.TestCase):
         self.assertEqual(calls[5], "basic packages")
 
     def test_disappeared_container_declines_creation_and_fails_without_probe_output(self):
-        for version in ("1.7.0", "1.8.2.5"):
+        for version in ("1.8.2.5", "1.8.3"):
             with self.subTest(version=version):
                 result, calls = self.run_builder(version=version, failure="disappeared")
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
