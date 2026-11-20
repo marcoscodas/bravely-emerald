@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef PLATFORM_DECK
+extern char *getenv(const char *name); // not <stdlib.h>: its abs/min/max names clash with the game headers
+#endif
 #include "trainer_pokemon_sprites.h"
 #include "bg.h"
 #include "constants/rgb.h"
@@ -1061,6 +1064,17 @@ static void Task_HandleMainMenuAPressed(u8 taskId)
             default:
                 gPlttBufferUnfaded[0] = RGB_BLACK;
                 gPlttBufferFaded[0] = RGB_BLACK;
+#ifdef PLATFORM_DECK
+                // Debug aid (DECK_START_LITTLEROOT=1): skip the Birch speech and start a new game in Littleroot Town.
+                if (getenv("DECK_START_LITTLEROOT") != NULL)
+                {
+                    gSaveBlock2Ptr->playerGender = MALE;
+                    NewGameBirchSpeech_SetDefaultPlayerName(0);
+                    SetMainCallback2(CB2_NewGame);
+                    DestroyTask(taskId);
+                    break;
+                }
+#endif
                 gTasks[taskId].func = Task_NewGameBirchSpeech_Init;
                 break;
             case ACTION_CONTINUE:

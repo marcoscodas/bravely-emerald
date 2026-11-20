@@ -30,6 +30,11 @@ bool DeckBattleFx_Begin(float seconds, float fade, DeckBattleFxFrame *out);
 bool DeckBattleFx_Enabled(void);   // level >= LOW and the program built (for DeckPost_WantScene)
 // GL thread, after DeckPost_Run, before the overlay: motes, weather, spotlights, hit glow, additive, into the window.
 void DeckBattleFx_DrawBackdrop(float seconds, float fade);
+// Battle scenery (voxel_battlescene): type glow and foreground bokeh, drawn right after DrawBackdrop. Level -1 = off (also when voxel_shaders is 0).
+int DeckBattleFx_SceneLevel(void);
+float DeckBattleFx_SceneK(void);     // 0 off, else 0.4 / 0.7 / 1.0 (LOW / MEDIUM / HIGH)
+bool DeckBattleFx_SceneDebug(void);  // env DECK_BATTLESCENE_DEBUG
+void DeckBattleFx_DrawScene(float seconds, float fade);
 void DeckBattleFx_Init(void);
 void DeckBattleFx_Shutdown(void);
 

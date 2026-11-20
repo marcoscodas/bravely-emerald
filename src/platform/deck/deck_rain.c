@@ -170,7 +170,7 @@ bool DeckRain_DrawStreaks(const DeckRainFrame *f)
 
     if (count < STREAK_COUNT / 4)
         count = STREAK_COUNT / 4;
-    count = (int)((float)count * DeckLevelPick(FAST_EXTRA_VOXEL_RAIN, 0.5f, 1.0f, 1.0f));
+    count = (int)((float)count * DeckLevelPick(FAST_EXTRA_VOXEL_RAIN, 0.5f, 1.0f, 1.0f) * f->density);
     if (alpha > 1.0f)
         alpha = 1.0f;
 
@@ -268,7 +268,7 @@ bool DeckRain_DrawSplashes(const DeckRainFrame *f)
 
     if (count < SPLASH_COUNT / 4)
         count = SPLASH_COUNT / 4;
-    count = (int)((float)count * DeckLevelPick(FAST_EXTRA_VOXEL_SPLASH, 0.5f, 1.0f, 1.0f));
+    count = (int)((float)count * DeckLevelPick(FAST_EXTRA_VOXEL_SPLASH, 0.5f, 1.0f, 1.0f) * f->density);
     DeckGl_UseProgram(&sSplash);
     DeckGl_Set3f(sSpTarget, f->target[0], f->target[1], f->target[2]);
     DeckGl_Set3f(sSpParams, 0.35f, 0.38f, 0.03f);

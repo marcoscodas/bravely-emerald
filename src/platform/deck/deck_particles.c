@@ -207,7 +207,7 @@ bool DeckParticles_Draw(const DeckPartFrame *f)
     int pollen = 0, fire = 0, leaf = 0;
     const u8 mapType = gMapHeader.mapType;
     const bool fireMap = mapType == MAP_TYPE_ROUTE || mapType == MAP_TYPE_TOWN;
-    const float lvl = DeckLevelPick(FAST_EXTRA_VOXEL_PARTICLES, 0.5f, 1.0f, 1.0f);
+    const float lvl = DeckLevelPick(FAST_EXTRA_VOXEL_PARTICLES, 0.5f, 1.0f, 1.0f) * f->density;
 
     if (!DeckParticles_Enabled() || sPart.program == 0 || sVbo == 0)
         return false;

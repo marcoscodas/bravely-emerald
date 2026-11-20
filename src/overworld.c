@@ -1524,8 +1524,14 @@ void CB2_OverworldBasic(void)
     OverworldBasic();
 }
 
+#ifdef PLATFORM_DECK
+void Deck_DebugBattleTick(void);
+#endif
 void CB2_Overworld(void)
 {
+#ifdef PLATFORM_DECK
+    Deck_DebugBattleTick();
+#endif
     bool32 fading = (gPaletteFade.active != 0);
     if (VitaDayNight_BerryDue())
         DoTimeBasedEvents();

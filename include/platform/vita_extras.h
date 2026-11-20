@@ -112,6 +112,13 @@ typedef enum
     FAST_EXTRA_VOXEL_UIBARS,   // HP / EXP bars: smooth fill, colour, low HP glow
     FAST_EXTRA_VOXEL_UIGLYPHS, // button prompts: 0 OFF (the port's PlayStation glyphs), 1 GBA, 2 DECK (stored value = index)
     FAST_EXTRA_VOXEL_UILAYOUT, // wide layout, item shadows, party bob
+    FAST_EXTRA_VOXEL_AO,       // Deck ground truth ambient occlusion (half-res GTAO from the scene depth), key voxel_ao
+    FAST_EXTRA_VOXEL_BATTLESCENE,  // Deck battle scenery: sharp focus band, weather, grade and light shafts, foreground leaves, type glow in 3D battles, key voxel_battlescene
+    FAST_EXTRA_VOXEL_CLOUDS,  // Deck cloud shadows drifting over the ground, key voxel_clouds
+    FAST_EXTRA_VOXEL_WINDOWS,  // Deck lit windows at night, key voxel_windows
+    FAST_EXTRA_VOXEL_CROWNS,  // Deck tree crown shading (top lit, dark underneath), key voxel_crowns
+    FAST_EXTRA_VOXEL_SPRLIGHT,  // Deck sun lit characters (side and rim light), key voxel_sprlight
+    FAST_EXTRA_VOXEL_FLYSHADOW,  // Deck shadows of flying Pokemon crossing the ground, key voxel_flyshadow
 #endif
     FAST_EXTRA_COUNT
 } FastExtraId;

@@ -51,8 +51,8 @@ of disk space. More in [docs/BUILDER.md](docs/BUILDER.md). To build by hand, see
 
 ## What you get
 
-- Lighting: a real sun shadow map, soft shadows under characters, and sun and moon rays that follow
-  the time of day.
+- Lighting: a real sun shadow map, soft shadows under characters, ambient occlusion, drifting cloud shadows,
+  lit windows at night with light rays, and sun and moon rays that follow the time of day.
 - Depth blur that follows the scene, plus bloom, colour grading and a vignette.
 - Relief on the ground, walls and sprites, so flat pixel art picks up a sense of depth.
 - Wind in the trees and grass, tall grass that bends as you walk, flowers, and water glints.

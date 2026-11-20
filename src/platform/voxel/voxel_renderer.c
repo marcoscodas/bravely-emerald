@@ -30,7 +30,9 @@
 #include "../deck/deck_gl_shader.h"
 #include "../deck/deck_post.h"
 #include "../deck/deck_sway.h"
+#include "../deck/deck_flyshadow.h"
 #include "../deck/deck_bump.h"
+#include "../deck/deck_windows.h"
 #include "../deck/deck_flowers.h"
 #include "../deck/deck_rain.h"
 #include "../deck/deck_particles.h"
@@ -3974,6 +3976,9 @@ static inline uint32_t ChunkContentHash(const int32_t cx0, const int32_t cy0, co
     // standing tall grass changes the tree region of every outdoor chunk (voxel_grass)
     if (!indoor && DeckGrass_Density() > 0)
         hash ^= 0x9E3779B9u + (uint32_t)DeckGrass_Density() * 0x01000193u;
+    // crown shading is baked into the tree vertices (voxel_crowns)
+    if (!indoor && VoxelTree_CrownStrength() > 0.0f)
+        hash ^= 0x7F4A7C15u + (uint32_t)(VoxelTree_CrownStrength() * 100.0f) * 0x01000193u;
 #endif
     return hash;
 }
@@ -3997,6 +4002,15 @@ static bool Frame_Begin(VoxelFrame *const f)
             if (sGrassSeen >= 0)
                 sWorldEpoch++;
             sGrassSeen = grass;
+        }
+        // same for voxel_crowns (the tree shading is baked)
+        static int sCrownsSeen = -1;
+        const int crowns = (int)(VoxelTree_CrownStrength() * 100.0f);
+        if (crowns != sCrownsSeen)
+        {
+            if (sCrownsSeen >= 0)
+                sWorldEpoch++;
+            sCrownsSeen = crowns;
         }
     }
 #endif
@@ -4470,6 +4484,16 @@ static void Frame_ReadAtmosphere(VoxelFrame *const f)
     f->seconds = (float)((double)(SDL_GetPerformanceCounter() - sVoxelAtmosphereStart) / (double)SDL_GetPerformanceFrequency());
 #ifdef PLATFORM_DECK
     DeckRain_Update(f->weather == VOXEL_WEATHER_RAIN, f->weatherAmount, f->indoor, f->seconds);
+    {
+        // flying Pokemon shadows: not indoors, underground or in a 3D battle; fewer and fainter in rain
+        static float sFlySeen = -1.0f;
+        const float flyDt = sFlySeen < 0.0f ? 0.0f : f->seconds - sFlySeen;
+
+        sFlySeen = f->seconds;
+        DeckFlyShadow_Update(flyDt, sCamera.targetX, sCamera.targetZ, !f->indoor && !f->underground, f->inBattle3D,
+                             f->weather == VOXEL_WEATHER_RAIN, VitaDayNight_GetSun()->strength);
+    }
+    DeckChars_SetEnv(f->indoor, f->weather == VOXEL_WEATHER_RAIN ? f->weatherAmount : 0.0f);
 #endif
 }
 
@@ -5295,6 +5319,7 @@ static void Pass_CastShadows(void)
         if (nBlobs > 0)
             DeckChars_DrawBlobs((const float (*)[4])blobs, nBlobs, gVoxelSun.dx, gVoxelSun.dz);
     }
+    DeckFlyShadow_Emit(sCamera.ground + 0.0f);
 #endif
     if (sShadowGlCount > 0 && sSpriteTex != 0)
     {
@@ -5414,6 +5439,11 @@ static void Pass_Entities(void)
                 glDrawArrays(GL_TRIANGLES, 0, (GLsizei)cFirst);
             if (sEntityGlCount > cEnd)
                 glDrawArrays(GL_TRIANGLES, (GLint)cEnd, (GLsizei)(sEntityGlCount - cEnd));
+            // night lantern halos behind the character cards, then the entity arrays back for the cards themselves
+            DeckChars_DrawGlow(sEntityGlVerts, (uint32_t)sizeof(VoxelGlVertex), cFirst, cEnd);
+            glVertexPointer(3, GL_FLOAT, sizeof(VoxelGlVertex), &sEntityGlVerts[0].x);
+            glTexCoordPointer(2, GL_FLOAT, sizeof(VoxelGlVertex), &sEntityGlVerts[0].u);
+            glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(VoxelGlVertex), &sEntityGlVerts[0].r);
             DeckChars_OutlineBegin(gVoxelSun.dx, gVoxelSun.dz, gVoxelSun.strength);
             glDrawArrays(GL_TRIANGLES, (GLint)cFirst, (GLsizei)(cEnd - cFirst));
             DeckChars_OutlineEnd();
@@ -5501,6 +5531,56 @@ static void Pass_NightLamps(const VoxelFrame *const f)
     }
 }
 
+#ifdef PLATFORM_DECK
+// Pass 5.15 (Deck): lit windows at dusk and night. The visible buildings' triangles again, after the day/night grade, with
+// the page's glow mask (deck_windows.c). Own chunk-offset block: the geometry is read from the chunk VBOs as pass 3 does.
+static void Pass_NightWindows(const VoxelFrame *const f)
+{
+    float amount;
+
+    if (f->indoor || f->inBattle3D || !VitaGame_IsOutdoor())
+        return;
+    amount = DeckWindows_Amount();
+    if (amount <= 0.01f || !DeckWindows_Begin(amount))
+        return;
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    ChunkOffsets_Begin();
+    for (int32_t i = 0; i < f->visibleCount; i++)
+    {
+        const VoxelChunkSlot *const chunk = f->visible[i];
+        bool bound = false;
+
+        for (uint8_t sp = 0; sp < chunk->buildingSpanCount; sp++)
+        {
+            const VoxelChunkBuildingSpan *const bspan = &chunk->buildingSpans[sp];
+            if (bspan->page < 0 || bspan->vertCount == 0)
+                continue;
+            const GLuint mask = DeckWindows_PageMask(bspan->page);
+            if (mask == 0)
+                continue;
+            glBindTexture(GL_TEXTURE_2D, mask);
+            if (!bound)
+            {
+                glBindBuffer(GL_ARRAY_BUFFER, chunk->vbo);
+                glVertexPointer(3, GL_FLOAT, sizeof(VoxelGlVertex), (const void *)offsetof(VoxelGlVertex, x));
+                glTexCoordPointer(2, GL_FLOAT, sizeof(VoxelGlVertex), (const void *)offsetof(VoxelGlVertex, u));
+                bound = true;
+            }
+            ChunkOffsets_Apply(chunk);
+            glDrawArrays(GL_TRIANGLES, (GLint)(chunk->buildingFirstVert + bspan->firstVert), (GLsizei)bspan->vertCount);
+        }
+    }
+    ChunkOffsets_End();
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    DeckWindows_End();
+}
+#endif
+
 // Passes 5.4-5.8: 3D fog and sand banks, dust motes and weather particles.
 static void Pass_Atmosphere3D(const VoxelFrame *const f)
 {
@@ -5546,10 +5626,14 @@ static void Pass_Atmosphere3D(const VoxelFrame *const f)
         bool motesDone = false;
 #ifdef PLATFORM_DECK
         // Phase 6 particles: pollen (replaces the 32 legacy motes), fireflies, leaves. Not in battles or caves.
-        if (!f->inBattle3D && !underground)
+        // Battle scenery (voxel_battlescene) brings them into 3D battles at up to 60 percent of the field density (box centred on the battle target).
+        const float sceneK = f->inBattle3D ? DeckBattleFx_SceneK() : 0.0f;
+        const float battleDensity = 0.6f * (0.5f + 0.5f * sceneK);
+        if ((!f->inBattle3D || sceneK > 0.0f) && !underground)
         {
             DeckPartFrame pf;
             int treeVerts = 0;
+            pf.density = f->inBattle3D ? battleDensity : 1.0f;
 
             for (int32_t i = 0; i < f->visibleCount; i++)
                 treeVerts += (int)f->visible[i]->treeCount;
@@ -5591,6 +5675,7 @@ static void Pass_Atmosphere3D(const VoxelFrame *const f)
                 rf.cam[0] = sCamera.x; rf.cam[1] = sCamera.y; rf.cam[2] = sCamera.z;
                 rf.target[0] = sCamera.targetX; rf.target[1] = sCamera.ground; rf.target[2] = sCamera.targetZ;
                 Deck_RainLight(rf.light);
+                rf.density = (f->inBattle3D && sceneK > 0.0f) ? battleDensity : 1.0f; // scenery: lighter rain in a battle so the battlers stay readable
                 DeckRain_DrawSplashes(&rf);
                 if (DeckRain_DrawStreaks(&rf))
                     wKind = NULL;
@@ -5937,6 +6022,8 @@ static void Pass_DeckPost(const VoxelFrame *const f)
     in.daylight = (isIndoor || dn == NULL) ? 1.0f : dn->daylight;
     in.glow = (isIndoor || dn == NULL) ? 0.0f : dn->glow;
     in.sunAmount = 0.0f;
+    in.cloudAmount = 0.0f;
+    in.winRaysAmount = (!isIndoor && !f->inBattle3D) ? DeckWindows_Amount() : 0.0f;
     in.moonAmount = 0.0f;
     in.beamX = 0.0f;
     in.beamY = 1.0f;
@@ -5967,6 +6054,21 @@ static void Pass_DeckPost(const VoxelFrame *const f)
             a = a > 1.0f ? 1.0f : (a < 0.0f ? 0.0f : a);
             d = d > 1.0f ? 1.0f : (d < 0.0f ? 0.0f : d);
             in.sunAmount = a * d * wf;
+            {
+                float cw = 0.4f; // cloud shadows: clear sky only, fading in fog, sand, rain
+                switch (f->weather)
+                {
+                case VOXEL_WEATHER_SUN: cw = 1.0f; break;
+                case VOXEL_WEATHER_CLEAR: cw = 0.9f; break;
+                case VOXEL_WEATHER_SHADE: cw = 0.5f; break;
+                case VOXEL_WEATHER_FOG: case VOXEL_WEATHER_SAND: cw = 0.3f; break;
+                case VOXEL_WEATHER_RAIN: cw = 0.0f; break;
+                default: break;
+                }
+                if (f->fogDensity >= 0.05f && cw > 0.3f)
+                    cw = 0.3f;
+                in.cloudAmount = a * d * cw;
+            }
             in.moonAmount = (1.0f - d) * 0.5f * wf;
             // Beam direction: the light is the real sun (day) or moon (night) from the clock, crossfaded like the colour
             // and the amount. World toward-the-light vector (-dx, 1, -dz), the convention of the baked rays and the shadow
@@ -5998,8 +6100,11 @@ static void Pass_DeckPost(const VoxelFrame *const f)
     in.time = f->seconds;
     in.battle = f->inBattle3D;
     in.sun = DeckSunShadow_Resolve();
+    in.haveInvVP = DeckSunShadow_CameraInvVP(in.invVP);
     in.zNear = VOXEL_PERSP_NEAR;
     in.zFar = VOXEL_PERSP_FAR;
+    in.tanHalfFov = tanf(sCamera.fov * (3.14159265f / 360.0f));
+    in.aspect = 960.0f / 544.0f;
     {
         const float fx = sCamera.targetX - sCamera.x, fy = sCamera.targetY - sCamera.y, fz = sCamera.targetZ - sCamera.z;
         in.focusDist = sqrtf(fx * fx + fy * fy + fz * fz); // the target sits on the view axis: its view depth
@@ -6011,7 +6116,10 @@ static void Pass_DeckPost(const VoxelFrame *const f)
     in.bfxOn = in.battle && DeckBattleFx_Begin(in.time, in.fade, &in.bfx);
     DeckPost_Run(&in);
     if (in.battle)
+    {
         DeckBattleFx_DrawBackdrop(in.time, in.fade); // after the post composite, before Pass_Overlay2D (battlers, HP boxes, text)
+        DeckBattleFx_DrawScene(in.time, in.fade);    // battle scenery (voxel_battlescene): opponent type glow, foreground bokeh; no-op when off
+    }
 }
 #endif
 
@@ -6518,6 +6626,9 @@ bool VoxelRenderer_RenderFrame(void)
         glDisable(GL_ALPHA_TEST);
 
         Pass_DayNightGrade(&f);
+#ifdef PLATFORM_DECK
+        Pass_NightWindows(&f);
+#endif
         Pass_NightLamps(&f);
         Pass_Atmosphere3D(&f);
         Pass_Atmosphere2D(&f);

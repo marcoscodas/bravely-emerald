@@ -1940,3 +1940,34 @@ u16 CountBattledRematchTeams(u16 trainerId)
 
     return i;
 }
+
+#ifdef PLATFORM_DECK
+extern char *getenv(const char *name);
+// Debug aid (DECK_START_BATTLE=1 together with DECK_START_LITTLEROOT=1): about 3 s after the field becomes controllable, force one
+// wild Poochyena (level 3) battle so the 3D battle can be screenshotted without playing. Called from CB2_Overworld every frame.
+void Deck_DebugBattleTick(void)
+{
+    static int sMode = -1;
+    static int sFrames;
+
+    if (sMode < 0)
+        sMode = (getenv("DECK_START_BATTLE") != NULL && getenv("DECK_START_LITTLEROOT") != NULL) ? 1 : 0;
+    if (sMode != 1)
+        return;
+    if (gPaletteFade.active || ArePlayerFieldControlsLocked())
+    {
+        sFrames = 0;
+        return;
+    }
+    if (++sFrames < 180)
+        return;
+    sMode = 2; // once
+    if (CalculatePlayerPartyCount() == 0)
+    {
+        CreateMon(&gPlayerParty[0], SPECIES_TREECKO, 5, 32, FALSE, 0, OT_ID_PLAYER_ID, 0);
+        CalculatePlayerPartyCount();
+    }
+    CreateMon(&gEnemyParty[0], SPECIES_POOCHYENA, 3, 32, FALSE, 0, OT_ID_PLAYER_ID, 0);
+    BattleSetup_StartScriptedWildBattle();
+}
+#endif

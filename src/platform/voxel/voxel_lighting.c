@@ -902,18 +902,42 @@ bool VoxelLighting_Warm(int32_t x0, int32_t z0, int32_t x1, int32_t z1, uint32_t
 }
 
 /* Small contact AO at the bases of solid neighbours; leave roof/crown art
- * alone. Ambient light keeps the original pixel art legible in shadow. */
+ * alone. Ambient light keeps the original pixel art legible in shadow.
+ *
+ * Eight probes: the four axis neighbours at a low height (any occluder, even
+ * a step, weight 1) and the four diagonals at a higher one (only tall
+ * occluders reach it, weight 1/2), so a wall base darkens more than a step and
+ * an inside corner (about 3.5 weight) more than a straight wall (about 2).
+ * Kept subtle: a later screen-space pass adds on top of this bake. */
+#define CONTACT_AXIS_REACH 0.28f   /* tile offset of the axis probes */
+#define CONTACT_DIAG_REACH 0.20f   /* per-axis tile offset of the diagonal probes */
+#define CONTACT_LOW_Y 0.3f         /* axis probe height over the point */
+#define CONTACT_HIGH_Y 0.9f        /* diagonal probe height: tall occluders only */
+#define CONTACT_DIAG_WEIGHT 0.5f   /* a diagonal hit against an axis hit */
+#define CONTACT_STRENGTH 0.088f    /* darkening per unit of weight */
+#define CONTACT_MAX 0.35f          /* darkest the bake goes, in a corner */
+
 static float Contact(float x, float y, float z)
 {
-    uint32_t covered = 0;
+    float covered;
+    float lo = y + CONTACT_LOW_Y, hi = y + CONTACT_HIGH_Y;
+    float dark;
 
     if (y - Cell(Tile(x), Tile(Standing(x, z)))->base > 0.41f)
         return 1.0f;
-    covered += Occludes(x - 0.28f, y + 0.3f, z);
-    covered += Occludes(x + 0.28f, y + 0.3f, z);
-    covered += Occludes(x, y + 0.3f, z - 0.28f);
-    covered += Occludes(x, y + 0.3f, z + 0.28f);
-    return 1.0f - 0.035f * (float)covered;
+    covered = (float)Occludes(x - CONTACT_AXIS_REACH, lo, z)
+            + (float)Occludes(x + CONTACT_AXIS_REACH, lo, z)
+            + (float)Occludes(x, lo, z - CONTACT_AXIS_REACH)
+            + (float)Occludes(x, lo, z + CONTACT_AXIS_REACH);
+    covered += CONTACT_DIAG_WEIGHT
+             * (float)(Occludes(x - CONTACT_DIAG_REACH, hi, z - CONTACT_DIAG_REACH)
+                     + Occludes(x + CONTACT_DIAG_REACH, hi, z - CONTACT_DIAG_REACH)
+                     + Occludes(x - CONTACT_DIAG_REACH, hi, z + CONTACT_DIAG_REACH)
+                     + Occludes(x + CONTACT_DIAG_REACH, hi, z + CONTACT_DIAG_REACH));
+    dark = CONTACT_STRENGTH * covered;
+    if (dark > CONTACT_MAX)
+        dark = CONTACT_MAX;
+    return 1.0f - dark;
 }
 
 /*

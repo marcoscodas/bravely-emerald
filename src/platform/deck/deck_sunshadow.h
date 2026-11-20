@@ -33,6 +33,7 @@ bool DeckSunShadow_BakedOff(void);
 
 void DeckSunShadow_Reset(void);                         // start of every frame: no map yet
 void DeckSunShadow_CaptureCamera(void);                 // after the camera matrices are loaded: remembers P * MV for the composite
+bool DeckSunShadow_CameraInvVP(float out[16]);           // camera clip -> world of this frame (independent of the sun map); false before the capture
 // Binds the map target, loads the sun matrices (projection = world -> sun clip, modelview identity) and clears the depth.
 // False: nothing to draw this frame (off, no sun, no target). Draw the casters with the fixed pipeline, then End.
 bool DeckSunShadow_Begin(float focusX, float focusY, float focusZ, float dx, float dz, float strength);

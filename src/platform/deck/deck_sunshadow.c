@@ -124,6 +124,14 @@ void DeckSunShadow_CaptureCamera(void)
     sHaveCam = Inv4(sInvVP, vp);
 }
 
+bool DeckSunShadow_CameraInvVP(float out[16])
+{
+    if (!sHaveCam)
+        return false;
+    memcpy(out, sInvVP, sizeof(sInvVP));
+    return true;
+}
+
 static bool EnsureTarget(int size)
 {
     if (sMap.fbo != 0 && sMap.w == size)

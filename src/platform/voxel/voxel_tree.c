@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <math.h>
 #include "voxel_tree.h"
 #include "voxel_relief.h"
 #include "voxel_regions.h"
@@ -8,6 +9,7 @@
 #ifdef PLATFORM_DECK
 #include "../deck/deck_sway.h"
 #include "../deck/deck_flowers.h"
+#include "../deck/deck_levels.h"
 #endif
 
 struct Tileset;
@@ -21,6 +23,45 @@ extern const struct Tileset gTileset_EverGrande;
 extern const struct Tileset gTileset_BattleFrontierOutsideWest;
 extern const struct Tileset gTileset_Mossdeep;
 extern const struct Tileset gTileset_Fallarbor;
+
+/*
+ * Deck crown shading (voxel_crowns): colour only, no triangles. The vertex shade of a crown card
+ * (the multiplier voxel_lighting works on) gets a gradient: top untouched, lower half darker,
+ * bottom edge (crown rim, trunk contact on a tileset's own tree) darkest, and a few percent more
+ * light on the side towards the sun. The shade is a scalar, so "cooler" is not possible here;
+ * the total stays inside -25 percent.
+ */
+float VoxelTree_CrownStrength(void)
+{
+#ifdef PLATFORM_DECK
+    if (VitaExtras_GetFast(FAST_EXTRA_VOXEL_SHADERS) == 0)
+        return 0.0f;
+    return DeckLevelPick(FAST_EXTRA_VOXEL_CROWNS, 0.4f, 0.7f, 1.0f);
+#else
+    return 0.0f;
+#endif
+}
+
+/* f: 1 at the crown's top, 0 at its foot. side: -1..1 across the crown, towards the sun positive.
+ * strength 0 gives exactly 1.0 (the old picture). */
+static float CrownShade(float strength, float f, float side)
+{
+    float dark, shade;
+
+    if (strength <= 0.0f)
+        return 1.0f;
+    dark = f >= 0.5f ? 0.18f * (1.0f - f) : 0.09f + 0.30f * (0.5f - f);
+    shade = (1.0f - strength * dark) * (1.0f + strength * 0.04f * side * gVoxelSun.strength);
+    return shade < 0.75f ? 0.75f : (shade > 1.04f ? 1.04f : shade);
+}
+
+/* The sun's side of the screen as -1..1 (toward-the-sun is -dx, as in deck_bump). */
+static float CrownSunX(void)
+{
+    const float len = sqrtf(gVoxelSun.dx * gVoxelSun.dx + gVoxelSun.dz * gVoxelSun.dz);
+
+    return len > 0.0001f ? -gVoxelSun.dx / len : 0.0f;
+}
 
 /* Where gen_voxel_trees.py packs each tree, in texels. */
 #define TEX_U(px) ((float)(px) / VOXEL_TREE_TEXTURE_DIM)
@@ -353,11 +394,18 @@ static void EmitSmallCell(VoxelBuilder *builder, const VoxelMapInstance *inst, i
     builder->swayRise = rise;
     builder->swayScale = grass ? 1.0f : 0.5f;
     builder->swayBend = grass;
-    VoxelBuilder_Quad(builder,
-        &(VoxelVertex){wx,        baseHeight + rise, baseZ - run, TEX_U(cx),      TEX_V(cy),      1.0f},
-        &(VoxelVertex){wx + 1.0f, baseHeight + rise, baseZ - run, TEX_U(cx + 16), TEX_V(cy),      1.0f},
-        &(VoxelVertex){wx + 1.0f, baseHeight,        baseZ,       TEX_U(cx + 16), TEX_V(cy + 32), 1.0f},
-        &(VoxelVertex){wx,        baseHeight,        baseZ,       TEX_U(cx),      TEX_V(cy + 32), 1.0f});
+    {
+        /* crown shading: grass tufts keep 1.0 */
+        const float k = grass ? 0.0f : VoxelTree_CrownStrength(), sx = CrownSunX() * 0.5f;
+        const float tl = CrownShade(k, 1.0f, -sx), tr = CrownShade(k, 1.0f, sx);
+        const float bl = CrownShade(k, 0.0f, -sx), br = CrownShade(k, 0.0f, sx);
+
+        VoxelBuilder_Quad(builder,
+            &(VoxelVertex){wx,        baseHeight + rise, baseZ - run, TEX_U(cx),      TEX_V(cy),      tl},
+            &(VoxelVertex){wx + 1.0f, baseHeight + rise, baseZ - run, TEX_U(cx + 16), TEX_V(cy),      tr},
+            &(VoxelVertex){wx + 1.0f, baseHeight,        baseZ,       TEX_U(cx + 16), TEX_V(cy + 32), br},
+            &(VoxelVertex){wx,        baseHeight,        baseZ,       TEX_U(cx),      TEX_V(cy + 32), bl});
+    }
     builder->rounded = false;
     builder->swayRise = 0.0f;
     builder->swayBend = false;
@@ -575,11 +623,19 @@ static void EmitCrownCard(VoxelBuilder *builder, const LargeArt *art, int32_t x,
     builder->swayY0 = baseHeight;
     builder->swayRise = rise;
     builder->swayScale = 0.5f;
-    VoxelBuilder_Quad(builder,
-        &(VoxelVertex){wx,        baseHeight + top * rise,    baseZ - top * run,    u0, v0, 1.0f},
-        &(VoxelVertex){wx + 1.0f, baseHeight + top * rise,    baseZ - top * run,    u1, v0, 1.0f},
-        &(VoxelVertex){wx + 1.0f, baseHeight + bottom * rise, baseZ - bottom * run, u1, v1, 1.0f},
-        &(VoxelVertex){wx,        baseHeight + bottom * rise, baseZ - bottom * run, u0, v1, 1.0f});
+    {
+        /* crown shading: f runs 1 (crown top) to 0 (foot) over both rows, side -1..1 over both columns */
+        const float k = VoxelTree_CrownStrength(), sx = CrownSunX();
+        const float sl = (float)col - 1.0f, sr = (float)col;
+        const float tl = CrownShade(k, top, sl * sx), tr = CrownShade(k, top, sr * sx);
+        const float bl = CrownShade(k, bottom, sl * sx), br = CrownShade(k, bottom, sr * sx);
+
+        VoxelBuilder_Quad(builder,
+            &(VoxelVertex){wx,        baseHeight + top * rise,    baseZ - top * run,    u0, v0, tl},
+            &(VoxelVertex){wx + 1.0f, baseHeight + top * rise,    baseZ - top * run,    u1, v0, tr},
+            &(VoxelVertex){wx + 1.0f, baseHeight + bottom * rise, baseZ - bottom * run, u1, v1, br},
+            &(VoxelVertex){wx,        baseHeight + bottom * rise, baseZ - bottom * run, u0, v1, bl});
+    }
     builder->rounded = false;
     builder->swayRise = 0.0f;
 }

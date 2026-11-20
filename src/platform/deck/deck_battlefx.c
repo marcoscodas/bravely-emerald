@@ -5,6 +5,7 @@
 #include "deck_battlefx.h"
 #include "deck_gl_shader.h"
 #include "deck_levels.h"
+#include "platform/vita_daynight.h"
 #include "global.h"
 #include "main.h"
 #include "sprite.h"
@@ -32,6 +33,8 @@ static const float kLowHp[3]     = { 0.60f, 0.80f, 1.00f };  // red edge pulse a
 static bool sReady;
 static DeckGlProgram sProg;
 static GLint sUKind = -1;
+static DeckGlProgram sFg;   // battle scenery: foreground bokeh program (one fullscreen quad)
+static GLint sFgTime = -1, sFgN = -1, sFgCol = -1, sFgCol2 = -1, sFgAlpha = -1;
 
 // Written by the game thread, read by the GL thread: a sequence number last (release), so a reader that sees the new number sees the payload.
 static struct { uint8_t type, target; bool crit, big; } sHit;
@@ -80,6 +83,57 @@ static const char *kFs =
     "    float a = s * vCol.a;\n"
     "    if (a < 0.003) discard;\n"
     "    gl_FragColor = vec4(vCol.rgb, a);\n"
+    "}\n";
+
+// Battle scenery foreground (docs/deck_notes_parts/battlescene.md): up to 8 out-of-focus discs and leaf shapes drifting slowly down the left
+// and right edges (x within 0..0.11 of the edge, y within the top 75 percent: never the centre third, never the text box rows).
+// vUv = the screen uv of the pixel (y down). Colour premultiplied by the shape alpha, composited with normal alpha blending.
+static const char *kFgFs =
+    "#version 120\n"
+    "uniform float uTime;\n"
+    "uniform float uN;\n"
+    "uniform vec3 uCol;\n"
+    "uniform vec3 uCol2;\n"
+    "uniform float uAlpha;\n"
+    "varying vec2 vUv;\n"
+    "varying vec4 vCol;\n"
+    "float h(float n) { return fract(sin(n) * 43758.5453); }\n"
+    "void main() {\n"
+    "    vec2 asp = vec2(960.0 / 544.0, 1.0);\n"
+    "    vec3 col = vec3(0.0);\n"
+    "    float A = 0.0;\n"
+    "    for (int i = 0; i < 8; i++) {\n"
+    "        if (float(i) >= uN) break;\n"
+    "        float fi = float(i);\n"
+    "        float r0 = h(fi * 12.9898 + 1.0), r1 = h(fi * 78.233 + 2.0), r2 = h(fi * 37.719 + 3.0), r3 = h(fi * 5.17 + 4.0);\n"
+    "        float right = mod(fi, 2.0);\n"
+    "        float sp = 0.02 + 0.03 * r1;\n"                                                  // screen heights per second
+    "        float py = fract(r0 + uTime * sp / 0.8 * (right > 0.5 ? -1.0 : 1.0));\n"
+    "        float y = py * 0.8 - 0.05;\n"
+    "        float x = 0.01 + 0.10 * r2 + 0.010 * sin(uTime * 0.13 * (0.6 + r3) + r1 * 6.2832);\n"
+    "        if (right > 0.5) x = 1.0 - x;\n"
+    "        float rad = 0.05 + 0.055 * r3;\n"                                                // height units
+    "        vec2 d = (vUv - vec2(x, y)) * asp;\n"
+    "        float fade = smoothstep(0.0, 0.15, py) * (1.0 - smoothstep(0.85, 1.0, py));\n"
+    "        float s;\n"
+    "        if (mod(fi, 3.0) < 1.0) {\n"                                                      // bokeh disc: soft edge, slightly brighter rim
+    "            float r = length(d) / rad;\n"
+    "            s = (1.0 - smoothstep(0.80, 1.0, r)) * (0.6 + 0.4 * smoothstep(0.45, 0.9, r));\n"
+    "        } else {\n"                                                                        // leaf: a lens along a slowly turning axis
+    "            float ang = r2 * 6.2832 + uTime * 0.06 * (r1 - 0.5);\n"
+    "            vec2 q = vec2(cos(ang) * d.x + sin(ang) * d.y, -sin(ang) * d.x + cos(ang) * d.y);\n"
+    "            q.x /= rad * 1.8;\n"
+    "            q.y /= rad * 0.55;\n"
+    "            s = smoothstep(0.0, 0.45, (1.0 - q.x * q.x) - abs(q.y));\n"
+    "            s *= 0.85;\n"
+    "        }\n"
+    "        float sa = s * fade * uAlpha * (0.75 + 0.25 * r2);\n"
+    "        vec3 sc = mix(uCol, uCol2, r0);\n"
+    "        col = col * (1.0 - sa) + sc * sa;\n"
+    "        A = A + sa * (1.0 - A);\n"
+    "    }\n"
+    "    if (A < 0.003) discard;\n"
+    "    gl_FragColor = vec4(col / A, A);\n"
     "}\n";
 
 typedef struct { float x, y, u, v, r, g, b, a; } Vtx;
@@ -168,12 +222,24 @@ void DeckBattleFx_Init(void)
         return;
     }
     sUKind = DeckGl_Uniform(&sProg, "uKind");
+    if (DeckGl_BuildProgram(&sFg, "battlefx_fg", kVs, kFgFs))
+    {
+        sFgTime = DeckGl_Uniform(&sFg, "uTime");
+        sFgN = DeckGl_Uniform(&sFg, "uN");
+        sFgCol = DeckGl_Uniform(&sFg, "uCol");
+        sFgCol2 = DeckGl_Uniform(&sFg, "uCol2");
+        sFgAlpha = DeckGl_Uniform(&sFg, "uAlpha");
+    }
+    else
+        DeckGl_Log("[BATTLEFX] foreground program build failed: no scenery leaves\n");
     sReady = true;
     DeckGl_Log("[BATTLEFX] ready\n");
 }
 
 void DeckBattleFx_Shutdown(void)
 {
+    if (sFg.program != 0)
+        DeckGl_DeleteProgram(&sFg);
     if (sProg.program != 0)
         DeckGl_DeleteProgram(&sProg);
     sReady = false;
@@ -417,6 +483,119 @@ void DeckBattleFx_DrawBackdrop(float seconds, float fade)
     }
 
     glDisableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+    DeckGl_UseProgram(NULL);
+    glEnable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+}
+
+// ---- battle scenery (voxel_battlescene; docs/deck_notes_parts/battlescene.md) ----
+static const float kSceneK[3] = { 0.4f, 0.7f, 1.0f };   // LOW MED HIGH: strength of the scenery effects
+static const int kLeafCount[3] = { 3, 5, 8 };           // foreground bokeh shapes
+#define SCENE_GLOW 0.14f                                // type glow strength at HIGH (additive alpha); pulses +-15 percent
+#define SCENE_LEAF_ALPHA 0.35f                          // foreground shape alpha cap (HIGH)
+
+int DeckBattleFx_SceneLevel(void)
+{
+    return VitaExtras_GetFast(FAST_EXTRA_VOXEL_SHADERS) != 0 ? DeckLevel(FAST_EXTRA_VOXEL_BATTLESCENE) : -1;
+}
+
+float DeckBattleFx_SceneK(void)
+{
+    const int l = DeckBattleFx_SceneLevel();
+
+    return l < 0 ? 0.0f : kSceneK[l];
+}
+
+bool DeckBattleFx_SceneDebug(void)
+{
+    static int s = -1;
+
+    if (s < 0)
+        s = getenv("DECK_BATTLESCENE_DEBUG") != NULL ? 1 : 0;
+    return s == 1;
+}
+
+// After DeckBattleFx_DrawBackdrop, before Pass_Overlay2D: the opponent's type glow and the foreground bokeh.
+void DeckBattleFx_DrawScene(float seconds, float fade)
+{
+    static float sSceneLog = -100.0f;
+    const int lvl = DeckBattleFx_SceneLevel();
+    const float keep = 1.0f - Clamp01(fade);
+    const bool log = DeckBattleFx_SceneDebug() && seconds - sSceneLog >= 5.0f;
+    float glowA = 0.0f;
+    int glowType = -1, leaves = 0;
+
+    if (!sReady || lvl < 0 || keep < 0.01f)
+        return;
+    if (log)
+        sSceneLog = seconds;
+
+    glDisable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    // ambient type glow: the opponent's primary type, a soft backlight and a faint tint on the ground, 6 s pulse, not during a hit flash
+    if (gMain.inBattle && gBattleMons[B_POSITION_OPPONENT_LEFT].species != 0)
+    {
+        float ux, uy;
+        const float since = seconds - sHitStart;
+
+        if (BattlerUv(B_POSITION_OPPONENT_LEFT, &ux, &uy))
+        {
+            float rgb[3];
+            const float pulse = 1.0f + 0.15f * sinf(seconds * (6.2831853f / 6.0f));
+            const float calm = since >= 1.2f ? 1.0f : (since > 0.6f ? (since - 0.6f) / 0.6f : 0.0f); // fades back in after the hit flash
+
+            glowType = gBattleMons[B_POSITION_OPPONENT_LEFT].types[0];
+            TypeTint(glowType, rgb);
+            glowA = SCENE_GLOW * kSceneK[lvl] * pulse * calm * keep;
+            if (glowA > 0.001f)
+            {
+                const float back[4] = { rgb[0], rgb[1], rgb[2], glowA };
+                const float ground[4] = { rgb[0], rgb[1], rgb[2], glowA * 0.8f };
+
+                DeckGl_UseProgram(&sProg);
+                glEnableClientState(GL_COLOR_ARRAY);
+                Quad(ux, uy - 0.02f, 0.26f, 0.26f, 0.0f, back);
+                Flush(0, true);
+                Quad(ux, uy + 0.09f, 0.20f, 0.05f, 0.0f, ground);
+                Flush(0, true);
+                glDisableClientState(GL_COLOR_ARRAY);
+            }
+        }
+    }
+
+    // foreground bokeh: slow soft leaves and discs at the screen edges, green and yellow by day, cool and dark at night
+    if (sFg.program != 0)
+    {
+        static const float quad[8] = { 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f };
+        const VitaDayNightLight *const dn = VitaDayNight_Get();
+        const float day = dn != NULL ? Clamp01(dn->daylight / 0.6f) : 1.0f;
+        const float dusk = dn != NULL ? Clamp01(dn->glow * 3.0f) : 0.0f;
+        const float c1[3] = { 0.06f + (0.30f - 0.06f) * day + 0.25f * dusk * day, 0.10f + (0.58f - 0.10f) * day, 0.15f + (0.16f - 0.15f) * day };
+        const float c2[3] = { 0.10f + (0.78f - 0.10f) * day, 0.14f + (0.70f - 0.14f) * day, 0.20f + (0.20f - 0.20f) * day };
+
+        leaves = kLeafCount[lvl];
+        DeckGl_UseProgram(&sFg);
+        DeckGl_Set1f(sFgTime, seconds);
+        DeckGl_Set1f(sFgN, (float)leaves);
+        DeckGl_Set3f(sFgCol, c1[0], c1[1], c1[2]);
+        DeckGl_Set3f(sFgCol2, c2[0], c2[1], c2[2]);
+        DeckGl_Set1f(sFgAlpha, SCENE_LEAF_ALPHA * keep);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisableClientState(GL_COLOR_ARRAY);
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+        glVertexPointer(2, GL_FLOAT, 0, quad);
+        glTexCoordPointer(2, GL_FLOAT, 0, quad);
+        glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+    }
+    if (log)
+        DeckGl_Log("[BATTLESCENE] t=%.0f level %d: leaves %d (alpha %.2f), type glow type %d alpha %.3f, keep %.2f\n", seconds, lvl, leaves,
+                   SCENE_LEAF_ALPHA * keep, glowType, glowA, keep);
+
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
     DeckGl_UseProgram(NULL);

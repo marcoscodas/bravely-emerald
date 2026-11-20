@@ -1,0 +1,14 @@
+# Debug start (needs env DECK_START_LITTLEROOT=1): title -> New Game goes straight to Littleroot Town (9,12). Format: <start_ms> <button> <duration_ms>
+15000 A 200
+17000 A 200
+19000 A 200
+21000 A 200
+23000 A 200
+25000 A 200
+27000 A 200
+29000 A 200
+40000 LEFT 1200
+43000 RIGHT 2400
+47000 DOWN 1500
+50000 LEFT 1500
+53000 RIGHT 1500

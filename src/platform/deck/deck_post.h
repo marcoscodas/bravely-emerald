@@ -21,10 +21,15 @@ typedef struct
     float time;            // animation clock, seconds
     float sunAmount;       // 0..1 shaft strength: sun and daylight, 0 at night, indoors, in rain, fog, sand, ash
     float zNear, zFar;     // projection planes of the scene (depth texture linearisation)
+    float tanHalfFov, aspect; // tan of half the vertical field of view, and the projection aspect (view-space position from the depth, voxel_ao)
     float focusDist;       // eye to target distance (view-space depth of the focus plane), 0 = unknown
     bool battle;           // a 3D battle: only the backdrop blur and dim (voxel_battledim) and the battle effects (voxel_battlefx)
     bool bfxOn;            // bfx below is this frame's battle effect composite parameters
     DeckBattleFxFrame bfx;
+    float cloudAmount;     // 0..1 cloud shadow strength scale: daylight sun by weather (0 night, indoors, rain; low in fog, sand)
+    float winRaysAmount;   // 0..~1.2 lit window light rays (DeckWindows_Amount: 0 by day, indoors, in battles)
+    bool haveInvVP;       // invVP below is this frame's camera clip -> world (cloud shadows)
+    float invVP[16];       // column-major
     const DeckSunResolve *sun; // this frame's sun shadow map (NULL: none)
     float dofTopRows, dofBottomRows, dofTopAlpha, dofBottomAlpha; // VOXEL_DOF_* (voxel_tuning.h:89-92)
 } DeckPostFrame;
@@ -38,11 +43,14 @@ typedef struct
     bool blur;     // voxel_blur on
     bool tilt;     // voxel_tiltshift on (needs the depth texture, else the band blur runs)
     bool shafts;   // voxel_shafts on
+    bool ao;       // voxel_ao on (needs the depth texture)
+    bool clouds;   // voxel_clouds on
     bool sun;      // voxel_sunshadow on and the composite can resolve it
     int sunLvl;
     int dimLvl;    // voxel_battledim, -1 off
+    int sceneLvl;  // voxel_battlescene (BATTLE SCENERY), -1 off: in a battle, focus band + grade, bloom, shafts (docs/deck_notes_parts/battlescene.md)
     bool lut;      // voxel_lut on (a generated colour table replaces the procedural grade)
-    int gradeLvl, bloomLvl, blurLvl, tiltLvl, shaftLvl, lutLvl; // resolved levels 0 low .. 2 high (AUTO = quality); -1 when off
+    int gradeLvl, bloomLvl, blurLvl, tiltLvl, shaftLvl, lutLvl, aoLvl, cloudLvl; // resolved levels 0 low .. 2 high (AUTO = quality); -1 when off
 } DeckPostConfig;
 
 void DeckPost_Init(int sceneW, int sceneH); // the size arguments are replaced by voxel_res

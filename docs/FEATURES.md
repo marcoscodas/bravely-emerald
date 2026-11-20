@@ -83,6 +83,10 @@ AUTO. Defaults are AUTO unless stated. The rows are those of `src/platform/vita/
 | WORLD > EFFECTS | COLOR GRADE, LUT GRADE | `voxel_grade`, `voxel_lut` | levels |
 | WORLD > EFFECTS | BLOOM, TILT-SHIFT, 3D RESOLUTION | `voxel_bloom`, `voxel_tiltshift`, `voxel_res` | levels |
 | WORLD > EFFECTS | LIGHT SHAFTS, SUN SHADOWS, SOFT SHADOWS | `voxel_shafts`, `voxel_sunshadow`, `voxel_shadow` | levels |
+| WORLD > EFFECTS | AMBIENT OCCLUSION | `voxel_ao` | levels |
+| WORLD > EFFECTS | CLOUD SHADOWS, TREE SHADING, FLYING SHADOWS | `voxel_clouds`, `voxel_crowns`, `voxel_flyshadow` | levels |
+| WORLD > EFFECTS | NIGHT WINDOWS (lit windows and light rays), SPRITE LIGHTING (also the night glow of characters) | `voxel_windows`, `voxel_sprlight` | levels |
+| WORLD > EFFECTS | BATTLE SCENERY | `voxel_battlescene` | levels |
 | WORLD > EFFECTS | RELIEF (BUMP), GROUND DETAIL | `voxel_bump`, `voxel_groundrelief` | levels |
 | WORLD > EFFECTS | WIND SWAY, GRASS & FLOWERS | `voxel_sway`, `voxel_grass` | levels |
 | WORLD > EFFECTS | RAIN STREAKS, WET GROUND, RAIN MIST, RAIN SPLASHES | `voxel_rain`, `voxel_wet`, `voxel_mist`, `voxel_splash` | levels |

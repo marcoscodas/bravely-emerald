@@ -35,6 +35,9 @@ bool VoxelTree_TallGrassStands(int32_t x, int32_t y);
 bool VoxelTree_FlowersStand(int32_t x, int32_t y); /* Deck: standing flowers on this cell (setting on, flower metatile) */
 uint32_t VoxelTree_FlowerCellsEmitted(void);
 uint32_t VoxelTree_TuftsEmitted(void); /* running total, for the debug log (Deck) */
+/* Deck voxel_crowns (TREE SHADING): strength of the crown vertex shading, 0 off, else 0.4 / 0.7 / 1.0; always 0 off Deck.
+ * Baked into the chunks: ChunkContentHash holds it and a change bumps the world epoch. */
+float VoxelTree_CrownStrength(void);
 void VoxelTree_EmitInstance(VoxelBuilder *builder, const VoxelMapInstance *inst,
                             int32_t x0, int32_t y0, int32_t x1, int32_t y1);
 void VoxelTree_EmitBorder(VoxelBuilder *builder, int32_t x0, int32_t y0, int32_t x1, int32_t y1);

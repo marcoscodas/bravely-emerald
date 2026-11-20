@@ -51,6 +51,7 @@ build scripts, telemetry, the multicore pipeline) is offered under the MIT licen
 | cJSON (Dave Gamble), in `src/platform/mods/` | MIT | JSON parsing |
 | nlohmann/json (Niels Lohmann), in `tools/jsonproc/` | MIT | Host tool |
 | Cinzel font (The Cinzel Project Authors), SIL Open Font License 1.1 ([docs/licenses/Cinzel-OFL.txt](docs/licenses/Cinzel-OFL.txt)) | OFL | Deck and Windows title lettering, rendered offline into `src/platform/deck/deck_title_font.h` by `tools/deck/gen_title_font.py` |
+| three.js GTAO shader (three.js authors, `examples/jsm/shaders/GTAOShader.js`, MIT, Copyright 2010-2026 three.js authors) after Jimenez, Wu, Pesce and Jarabo, "Practical Real-Time Strategies for Accurate Indirect Occlusion", SIGGRAPH 2016 course notes | MIT | Ported to GLSL 1.20 in `src/platform/deck/deck_post.c` (`kAoFs`, Deck and Windows ambient occlusion, `voxel_ao`) |
 | pret host tools (`tools/preproc`, `gbagfx`, `aif2pcm`, `mid2agb`, `mapjson`, `jsonproc`, `scaninc`) | from pret | Asset conversion at build time |
 
 ## Follower Pokémon assets

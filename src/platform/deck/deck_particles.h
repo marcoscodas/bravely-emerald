@@ -17,6 +17,7 @@ typedef struct
     int treeVerts;         // tree vertices of the visible chunks (leaf density), 0 = none
     bool rain;             // weather is rain: no particles at all
     bool calm;             // weather is not sun/clear (fog, sand, ash, snow): no pollen or leaves
+    float density;         // count multiplier (1 = the field; battle scenery 0.6 and below)
 } DeckPartFrame;
 
 void DeckParticles_Init(void);

@@ -1,6 +1,6 @@
 #!/bin/sh
 # usage (on the Deck, repo root): perf_matrix.sh   -> shots/perf/<name>/report.txt, summary on stdout
-K="voxel_blur voxel_grade voxel_bloom voxel_sway voxel_grass voxel_rain voxel_wet voxel_mist voxel_splash voxel_particles voxel_glint voxel_outline voxel_shadow voxel_lut voxel_bump voxel_shafts voxel_tiltshift"
+K="voxel_blur voxel_grade voxel_bloom voxel_sway voxel_grass voxel_rain voxel_wet voxel_mist voxel_splash voxel_particles voxel_glint voxel_outline voxel_shadow voxel_lut voxel_bump voxel_shafts voxel_tiltshift voxel_ao"
 all() { for k in $K; do printf '%s=%s ' "$k" "$1"; done; }
 out=/run/media/deck/SD512/emerald-deck/shots/perf
 run() { # name setkey extraenv

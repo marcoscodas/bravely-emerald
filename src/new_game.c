@@ -1,4 +1,7 @@
 #include "global.h"
+#ifdef PLATFORM_DECK
+extern char *getenv(const char *name); // not <stdlib.h>: its abs/min/max names clash with the game headers
+#endif
 #include "new_game.h"
 #include "random.h"
 #include "pokemon.h"
@@ -137,6 +140,12 @@ static void ClearFrontierRecord(void)
 
 static void WarpToTruck(void)
 {
+#ifdef PLATFORM_DECK
+    // Debug aid (DECK_START_LITTLEROOT=1): the new game starts in the open ground of Littleroot Town, not in the truck.
+    if (getenv("DECK_START_LITTLEROOT") != NULL)
+        SetWarpDestination(MAP_GROUP(MAP_LITTLEROOT_TOWN), MAP_NUM(MAP_LITTLEROOT_TOWN), WARP_ID_NONE, 9, 12);
+    else
+#endif
     SetWarpDestination(MAP_GROUP(MAP_INSIDE_OF_TRUCK), MAP_NUM(MAP_INSIDE_OF_TRUCK), WARP_ID_NONE, -1, -1);
     WarpIntoMap();
 }

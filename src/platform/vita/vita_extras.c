@@ -139,6 +139,13 @@ static inline int32_t LookupFastId(const char *key)
         if (strcmp(key, "voxel_flatfx") == 0) return FAST_EXTRA_VOXEL_FLATFX;
         if (strcmp(key, "voxel_title") == 0) return FAST_EXTRA_VOXEL_TITLE;
         if (strcmp(key, "voxel_reveal") == 0) return FAST_EXTRA_VOXEL_REVEAL;
+        if (strcmp(key, "voxel_ao") == 0) return FAST_EXTRA_VOXEL_AO;
+        if (strcmp(key, "voxel_battlescene") == 0) return FAST_EXTRA_VOXEL_BATTLESCENE;
+        if (strcmp(key, "voxel_clouds") == 0) return FAST_EXTRA_VOXEL_CLOUDS;
+        if (strcmp(key, "voxel_windows") == 0) return FAST_EXTRA_VOXEL_WINDOWS;
+        if (strcmp(key, "voxel_crowns") == 0) return FAST_EXTRA_VOXEL_CROWNS;
+        if (strcmp(key, "voxel_sprlight") == 0) return FAST_EXTRA_VOXEL_SPRLIGHT;
+        if (strcmp(key, "voxel_flyshadow") == 0) return FAST_EXTRA_VOXEL_FLYSHADOW;
 #endif
         break;
     default:
@@ -391,6 +398,13 @@ const VitaExtra gVitaExtras[] = {
     { VITA_TAB_WORLD,   "EFFECTS", "BATTLE BACKDROP", "voxel_battledim", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
     { VITA_TAB_WORLD,   "EFFECTS", "BATTLE EFFECTS", "voxel_battlefx", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
     { VITA_TAB_WORLD,   "EFFECTS", "SUN SHADOWS", "voxel_sunshadow", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "AMBIENT OCCLUSION", "voxel_ao", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "BATTLE SCENERY", "voxel_battlescene", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "CLOUD SHADOWS", "voxel_clouds", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "NIGHT WINDOWS", "voxel_windows", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "TREE SHADING", "voxel_crowns", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "SPRITE LIGHTING", "voxel_sprlight", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
+    { VITA_TAB_WORLD,   "EFFECTS", "FLYING SHADOWS", "voxel_flyshadow", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
     { VITA_TAB_WORLD,   "EFFECTS", "LIGHT SHAFTS",     "voxel_shafts", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
     { VITA_TAB_WORLD,   "EFFECTS", "TILT-SHIFT",       "voxel_tiltshift", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },
     { VITA_TAB_WORLD,   "EFFECTS", "INTRO EFFECTS", "voxel_flatfx", 5, 1, sVoxelLevelValues, NULL, NULL, NULL },

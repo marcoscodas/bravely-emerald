@@ -15,6 +15,7 @@ typedef struct
     float cam[3];             // camera position
     float target[3];          // camera target x, ground height, target z (the rain box is centred on it)
     float light[3];           // day/night light colour (rain colour is scaled by it)
+    float density;            // count multiplier of streaks and splashes (1 = field; battle scenery 0.6)
 } DeckRainFrame;
 
 void DeckRain_Init(void);
