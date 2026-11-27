@@ -1,5 +1,9 @@
 """The app never ends silently: crash hooks, one instance, odd inputs, a killed child, a full disk, no internet, and the report that
 can be pasted into an issue."""
+import hashlib
+import io
+import ssl
+import urllib.error
 import os
 import subprocess
 import sys
@@ -219,6 +223,71 @@ class PreconditionTests(unittest.TestCase):
              mock.patch("tempfile.gettempdir", lambda d=tempfile.mkdtemp(): d):
             self.assertFalse(b._run_msys2_install(T()))
         self.assertEqual(asked, [constants.MSYS_INSTALLER_SHA256])
+
+    def cert_download(self, curl_bytes=b"installer", curl_exit=0, error=None, wanted=b"installer"):
+        """_download when Python rejects the certificate; Windows' curl is replaced by a stand-in that writes curl_bytes."""
+        b = Builder(REPO)
+        lines, calls = [], []
+        folder = tempfile.mkdtemp()
+        dest = os.path.join(folder, "i.exe")
+
+        class T:
+            cancel_requested = False
+            proc = None
+
+            def log(self, s):
+                lines.append(s)
+
+        class Curl:
+            def __init__(self, argv, **kw):
+                calls.append(argv)
+                if curl_bytes is not None:
+                    with open(argv[argv.index("-o") + 1], "wb") as f:
+                        f.write(curl_bytes)
+                self.stdout = io.BytesIO(b"" if curl_exit == 0 else b"curl: (35) schannel: failed")
+
+            def wait(self, timeout=None):
+                return curl_exit
+        if error is None:
+            error = urllib.error.URLError(ssl.SSLCertVerificationError(
+                1, "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate"))
+        with mock.patch("urllib.request.urlopen", side_effect=error), mock.patch("subprocess.Popen", Curl), \
+             mock.patch.object(b, "_windows_curl", lambda: "C:\\Windows\\System32\\curl.exe"):
+            ok = b._download(T(), dest, hashlib.sha256(wanted).hexdigest())
+        return ok, calls, lines, dest
+
+    def test_a_rejected_certificate_retries_with_windows_curl_and_still_checks_the_file(self):
+        from core import constants
+        ok, calls, lines, dest = self.cert_download()
+        self.assertTrue(ok, lines)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0].rsplit("\\", 1)[-1], "curl.exe")
+        self.assertIn(constants.MSYS_INSTALLER_URL, calls[0])
+        for unsafe in ("-k", "--insecure", "--ssl-no-revoke"):
+            self.assertNotIn(unsafe, calls[0])
+        with open(dest, "rb") as f:
+            self.assertEqual(f.read(), b"installer")
+
+    def test_a_wrong_file_from_curl_is_deleted(self):
+        ok, _, lines, dest = self.cert_download(curl_bytes=b"something else")
+        self.assertFalse(ok)
+        self.assertFalse(os.path.exists(dest))
+        self.assertFalse(os.path.exists(dest + ".part"))
+        self.assertTrue(any("does not match" in x for x in lines), lines)
+
+    def test_when_curl_fails_too_the_player_is_told_to_install_msys2_by_hand(self):
+        from core.errors import explain
+        ok, _, lines, _ = self.cert_download(curl_bytes=None, curl_exit=35)
+        self.assertFalse(ok)
+        text = "\n".join(lines)
+        for part in ("https://www.msys2.org", "C:\\msys64", "schannel: failed"):
+            self.assertIn(part, text)
+        self.assertTrue(any("by hand" in h["title"] for h in explain(lines)), explain(lines))
+
+    def test_other_download_errors_do_not_use_curl(self):
+        ok, calls, _, _ = self.cert_download(error=OSError("no route to host"))
+        self.assertFalse(ok)
+        self.assertEqual(calls, [])
 
     def test_msys2_download_failure_is_a_logged_failure(self):
         b = Builder(REPO)

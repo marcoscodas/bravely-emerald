@@ -22,6 +22,10 @@ KNOWN_ERRORS = [
     (r"not a Pok.mon Emerald dump|header is damaged|does not exist\b",
      "The ROM was rejected.",
      "Use an unmodified dump of Pokemon Emerald (any language, 16 MiB, game code BPE?). Patched or truncated files fail."),
+    (r"could not download the MSYS2 installer",
+     "The MSYS2 download failed: install it by hand.",
+     "Get MSYS2 from https://www.msys2.org, install it in the default folder C:\\msys64, then press Start build again. "
+     "If your antivirus scans HTTPS connections, turn that off for the build."),
     (r"curl: \(60\)|unable to get local issuer certificate|SSL certificate problem",
      "A download was refused because its certificate is not trusted.",
      "Antivirus 'HTTPS scanning' or a proxy is re-signing the connection. Turn that off for this build (or add github.com "

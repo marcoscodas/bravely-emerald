@@ -13,7 +13,7 @@ MSYS_PACKAGES = [                       # docs/WINDOWS_BUILD.md, Rebuild step 1
     "mingw-w64-x86_64-gcc", "mingw-w64-x86_64-libpng", "mingw-w64-x86_64-pkgconf",
     "mingw-w64-x86_64-python-pillow",
 ]
-APP_VERSION = "1.0"
+APP_VERSION = "1.0.1"
 MSYS_DEFAULT_ROOT = "C:\\msys64"
 SDL2_VERSION = "2.32.10"
 SDL2_IMAGE_VERSION = "2.8.12"

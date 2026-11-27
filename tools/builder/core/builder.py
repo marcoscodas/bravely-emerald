@@ -3,6 +3,7 @@
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,11 @@ CONTAINER_TIMESTAMP = re.compile(r" \[([0-9]{1,10}[.,][0-9]{6})\]$")
 def _container_time(line):
     timestamp = CONTAINER_TIMESTAMP.search(line)
     return float(timestamp[1].replace(",", ".")) if timestamp else None
+
+
+def is_certificate_error(e):
+    """True when a download failed because Python did not accept the server's certificate."""
+    return isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(e)
 
 
 class Builder:
@@ -726,6 +732,7 @@ class Builder:
 
     def _download(self, task, dest, expected):
         part = dest + ".part"
+        total = 0
         try:
             req = urllib.request.Request(MSYS_INSTALLER_URL, headers={"User-Agent": "bravely-builder"})
             with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as out:
@@ -743,6 +750,23 @@ class Builder:
                     if total and got * 100 // total >= last + 10:
                         last = got * 100 // total
                         task.log("  %d%% (%d of %d MB)" % (last, got >> 20, total >> 20))
+        except Exception as e:
+            if not is_certificate_error(e):
+                task.log("ERROR: download failed: %s. Check the internet connection; a proxy or antivirus may be blocking github.com." % e)
+                return False
+            total = 0
+            # Python only knows the certificates already saved on the PC and checks them strictly; Windows' own curl
+            # verifies them the way Windows does. The file is checked against its SHA-256 whoever downloads it.
+            task.log("Python did not accept the certificate: %s" % e)
+            task.log("Trying again with Windows' own downloader (certificates are still checked; no progress is shown, "
+                     "the file is about 85 MB).")
+            if not self._download_with_windows_curl(task, part):
+                if not task.cancel_requested:
+                    task.log("ERROR: could not download the MSYS2 installer. You can install MSYS2 yourself: get it from "
+                             "https://www.msys2.org, install it in the default folder C:\\msys64, then start the build again. "
+                             "The builder finds it and skips this download.")
+                return False
+        try:
             if total and os.path.getsize(part) != total:
                 task.log("ERROR: the download is incomplete (%d of %d bytes). Check the connection and try again." % (os.path.getsize(part), total))
                 return False
@@ -754,9 +778,35 @@ class Builder:
                 return False
             os.replace(part, dest)
             return True
-        except Exception as e:
-            task.log("ERROR: download failed: %s. Check the internet connection; a proxy or antivirus may be blocking github.com." % e)
+        except OSError as e:
+            task.log("ERROR: download failed: %s." % e)
             return False
+
+    def _windows_curl(self):
+        """The curl.exe that ships with Windows 10 and 11 (it verifies certificates through Windows), or None."""
+        path = os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32", "curl.exe")
+        return path if os.path.isfile(path) else None
+
+    def _download_with_windows_curl(self, task, part):
+        curl = self._windows_curl()
+        if not curl:
+            task.log("Windows' curl.exe was not found.")
+            return False
+        argv = [curl, "-fsSL", "--retry", "3", "--connect-timeout", "30", "-o", part, MSYS_INSTALLER_URL]
+        task.log("$ " + subprocess.list2cmdline(argv))
+        try:
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            task.proc = proc                      # Cancel stops it
+            for raw in iter(proc.stdout.readline, b""):
+                task.log(raw.decode("utf-8", "replace").rstrip())
+            code = proc.wait()
+        except OSError as e:
+            task.log("curl could not be started: %s" % e)
+            return False
+        if code:
+            task.log("curl exit code %d" % code)
+        return code == 0 and not task.cancel_requested
 
     def _run_msys2_install(self, task):
         """Download the official installer (consent was given in the UI) and run it silently."""
