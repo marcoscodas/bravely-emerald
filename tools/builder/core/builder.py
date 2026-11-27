@@ -33,6 +33,11 @@ def _container_time(line):
     return float(timestamp[1].replace(",", ".")) if timestamp else None
 
 
+# The codes in square brackets tell us which problem a player hit from the one line they send.
+MSYS2_MISSING = ("[BB-MSYS2-MISSING] MSYS2 was not found. The build installs it for you; if that fails, get it from "
+                 "https://www.msys2.org and install it in the default folder C:\\msys64.")
+
+
 def is_certificate_error(e):
     """True when a download failed because Python did not accept the server's certificate."""
     return isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(e)
@@ -326,7 +331,7 @@ class Builder:
             return "Install MSYS2", ["download", "install"], [("msys2", None)]
         if what == "packages":
             if not os.path.isfile(self.msys_bash()):
-                raise ValueError("Install MSYS2 first.")
+                raise ValueError(MSYS2_MISSING)
             s1, e1 = self.msys_cmd('pacman --noconfirm -Syu')
             s2, e2 = self.msys_cmd('pacman --noconfirm -S --needed "$@"', MSYS_PACKAGES)
             return "Install MSYS2 packages", ["packages"], [
@@ -335,7 +340,7 @@ class Builder:
                 Step("pacman -S the build packages", "packages", s2, e2)]
         if what == "deps":
             if not os.path.isfile(self.msys_bash()):
-                raise ValueError("Install MSYS2 first.")
+                raise ValueError(MSYS2_MISSING)
             argv, env = self.msys_cmd('cd "$(cygpath -u "$1")" && bash tools/windows/build_deps.sh', [self.repo], "MINGW32")
             return "Build SDL2 and SDL2_image", ["deps"], [Step("SDL2 2.32.10 + SDL2_image 2.8.12 (static, 32-bit)", "deps", argv, env)]
         raise ValueError("unknown install item")
@@ -762,7 +767,7 @@ class Builder:
                      "the file is about 85 MB).")
             if not self._download_with_windows_curl(task, part):
                 if not task.cancel_requested:
-                    task.log("ERROR: could not download the MSYS2 installer. You can install MSYS2 yourself: get it from "
+                    task.log("ERROR: [BB-MSYS2-DOWNLOAD] could not download the MSYS2 installer. You can install MSYS2 yourself: get it from "
                              "https://www.msys2.org, install it in the default folder C:\\msys64, then start the build again. "
                              "The builder finds it and skips this download.")
                 return False

@@ -78,6 +78,8 @@ Common problems:
   On Steam Deck, keep Podman's storage on the internal disk if the error points to external storage.
 * **No picture or no display when started over SSH.** Start the program from a terminal on the desktop instead.
 * **Not enough disk space.** Free some space or choose another install folder in Settings.
+* **Codes in square brackets** (such as `[BB-MSYS2-DOWNLOAD]`, `[BB-MSYS2-MISSING]`, `[BB-UI-DOWNLOAD]`,
+  `[BB-UI-SOURCE]`) name the problem. Include the code and the message when you report it.
 * **"certificate verify failed" while MSYS2 is downloaded (Windows).** The builder tries Windows' own downloader too. If that
   also fails, get MSYS2 from https://www.msys2.org, install it in the default folder C:\msys64 and start the build again.
 * **A download failed.** Check the internet connection and try again.

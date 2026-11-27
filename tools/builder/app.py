@@ -65,6 +65,28 @@ def fatal_box(title, text):
         pass
 
 
+ISSUES_URL = "https://github.com/marcoscodas/bravely-emerald/issues"
+
+
+def ui_problem_message(exc, frozen):
+    """Message for a failure to load the window library, with a code that tells us which case a player hit; None for
+    other failures."""
+    names = "%s %r" % (getattr(exc, "name", "") or "", exc)
+    if not isinstance(exc, ImportError) or not any(w in names for w in ("PySide6", "shiboken", "Qt")):
+        return None
+    what = repr(exc)[:300]
+    if frozen:
+        return ("[BB-UI-DOWNLOAD] The builder could not load its window files.\n\n%s\n\n"
+                "The download may be incomplete, or something (such as an antivirus) removed files from it. Download the "
+                "builder again and unpack it into an empty folder. Installing PySide6 yourself will not help: the downloaded "
+                "builder only uses its own copy. On Linux, if the line above names a missing .so file, install that system "
+                "library.\n\nIf it still happens, send us this message (code BB-UI-DOWNLOAD):\n%s" % (what, ISSUES_URL))
+    return ("[BB-UI-SOURCE] You are running the builder from source, and Python cannot load PySide6.\n\n%s\n\n"
+            "Install it:  python -m pip install PySide6-Essentials\nhttps://pypi.org/project/PySide6/\n\n"
+            "Or use the downloaded builder, which includes it:\n"
+            "https://github.com/marcoscodas/bravely-emerald/releases/latest" % what)
+
+
 def start_failed(exc):
     """The app could not start (a missing module, a broken install): log it and tell the user in plain words."""
     import traceback
@@ -80,6 +102,10 @@ def start_failed(exc):
             break
         except OSError:
             path = "(the log could not be saved)"
+    ui_text = ui_problem_message(exc, bool(getattr(sys, "frozen", False)))
+    if ui_text:
+        fatal_box("Bravely Emerald Builder", "%s\n\nDetails were saved in:\n%s" % (ui_text, path))
+        return
     fatal_box("Bravely Emerald Builder", "The builder could not start.\n\n%s\n\nThe app files are probably incomplete: download the "
               "package again and unpack it into an empty folder.\n\nDetails were saved in:\n%s" % (repr(exc)[:300], path))
 
@@ -130,8 +156,9 @@ def main(argv=None):
     try:
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QApplication
-    except ImportError:
-        sys.exit("PySide6 is needed: pip install PySide6   (or use the packaged BravelyEmeraldBuilder)")
+    except ImportError as e:
+        start_failed(e)
+        return 1
     from PySide6.QtCore import QObject, Signal, qInstallMessageHandler
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtWidgets import QMessageBox

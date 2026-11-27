@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 BUILDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BUILDER)
@@ -52,6 +53,51 @@ class PackagingTests(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         self.assertIn("IMPORTS OK", p.stdout)
         self.assertIn("OK   core.crash", p.stdout)
+
+    def start_failure_text(self, exc, frozen):
+        import app
+        shown = []
+        with mock.patch.object(app, "fatal_box", lambda title, text: shown.append(text)), \
+             mock.patch.object(app.sys, "frozen", frozen, create=True), \
+             mock.patch.dict(os.environ, {"BRAVELY_BUILDER_HOME": tempfile.mkdtemp(prefix="bb-fatal-")}):
+            app.start_failed(exc)
+        return shown[0]
+
+    def test_downloaded_builder_without_its_window_files_names_the_problem(self):
+        text = self.start_failure_text(ImportError("DLL load failed while importing QtCore: not found", name="PySide6.QtCore"), True)
+        for part in ("BB-UI-DOWNLOAD", "DLL load failed", "empty folder", "github.com/marcoscodas/bravely-emerald/issues",
+                     "Installing PySide6 yourself will not help"):
+            self.assertIn(part, text)
+        self.assertNotIn("pip install", text)
+
+    def test_running_from_source_without_pyside6_gives_the_command_and_link(self):
+        text = self.start_failure_text(ModuleNotFoundError("No module named 'PySide6'", name="PySide6"), False)
+        for part in ("BB-UI-SOURCE", "pip install PySide6-Essentials", "https://pypi.org/project/PySide6/",
+                     "releases/latest"):
+            self.assertIn(part, text)
+
+    def test_other_start_failures_keep_their_own_message(self):
+        text = self.start_failure_text(ImportError("cannot import name 'crash' from 'core'", name="core"), True)
+        self.assertIn("download the package again", text)
+        self.assertNotIn("BB-UI", text)
+
+    def test_the_window_import_failure_goes_through_that_message(self):
+        """It used to exit with "pip install PySide6" even in the downloaded builder, where that cannot help."""
+        with open(os.path.join(BUILDER, "app.py"), encoding="utf-8") as f:
+            self.assertNotIn('sys.exit("PySide6 is needed', f.read())
+
+    def test_msys2_messages_carry_their_codes(self):
+        from core import Builder
+        b = Builder(os.path.dirname(os.path.dirname(BUILDER)), dry_run=True)
+        b.host = {"kind": "windows"}
+        with mock.patch.object(b, "msys_bash", lambda: os.path.join(tempfile.mkdtemp(), "bash.exe")):
+            for what in ("packages", "deps"):
+                with self.assertRaises(ValueError) as c:
+                    b._plan_install(what)
+                for part in ("BB-MSYS2-MISSING", "https://www.msys2.org", "C:\\msys64"):
+                    self.assertIn(part, str(c.exception))
+        with open(os.path.join(BUILDER, "core", "builder.py"), encoding="utf-8") as f:
+            self.assertIn("ERROR: [BB-MSYS2-DOWNLOAD] could not download the MSYS2 installer", f.read())
 
     def test_import_error_at_start_gives_a_message_not_a_traceback_dialog(self):
         import app
