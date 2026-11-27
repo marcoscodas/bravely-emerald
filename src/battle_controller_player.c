@@ -2713,6 +2713,9 @@ static void PlayerHandleChoosePokemon(void)
         gBattlerInMenuId = gActiveBattler;
         gSelectedMonPartyId = PARTY_SIZE;
         gPartyMenuUseExitCallback = FALSE;
+        // The slot the engine says is already taken (PARTY_SIZE: none). The party screen refuses it; left unset it is 0,
+        // so the first POKéMON could not be sent back out once it had left the battle.
+        gBattleStruct->prevSelectedPartySlot = gBattleBufferA[gActiveBattler][2];
         if (!Ui_OpenBattleParty())
             VitaUI_Open(VITA_UI_SEC_POKEMON);
     }
