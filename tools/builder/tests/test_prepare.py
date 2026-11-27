@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 
 BUILDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -142,6 +143,25 @@ class PrepareTests(unittest.TestCase):
     def test_prepare_says_where_the_build_files_go_when_they_are_elsewhere(self):
         self.assertIn("/x/parts", self.prepare_output("/x/parts"))
         self.assertNotIn("space", self.prepare_output(""))
+
+    def test_prepare_runs_with_the_real_windows_plan(self):
+        """The Windows plan has no 'parts' entry; prepare must still get to the build (it crashed with KeyError: 'parts')."""
+        out_dir = os.path.join(self.tmp, "game")
+        real = cli.Builder(os.path.dirname(os.path.dirname(BUILDER)), dry_run=True)
+        real.host = {"kind": "windows"}
+        old = cli.make_builder
+        cli.make_builder = lambda repo, dry=False, force=False: (real, None)
+        try:
+            with unittest.mock.patch.object(real, "targets", lambda: [{"id": "windows", "available": True, "why": ""}]), \
+                 unittest.mock.patch("core.builder.source_path_problem", lambda *a: None):
+                label, stages, steps, meta = real.plan_build({"targets": ["windows"], "rom": self.rom, "jobs": 2,
+                                                              "dir": out_dir, "force_assets": True})
+                self.assertNotIn("parts", meta)
+                with unittest.mock.patch.object(real, "start", side_effect=RuntimeError("reached the build")):
+                    with self.assertRaisesRegex(RuntimeError, "reached the build"):
+                        run_prepare(["--game", self.rom, "--target", "windows", "--out", out_dir, "--allow-downloads"])
+        finally:
+            cli.make_builder = old
 
     def test_app_routes_prepare_to_the_cli(self):
         import app

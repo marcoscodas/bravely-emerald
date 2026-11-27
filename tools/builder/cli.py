@@ -218,7 +218,7 @@ def prepare(a):
             print("ERROR: " + str(e))
             return 2
         meta["container"] = a.container
-        if meta.get("parts") != meta.get("dir"):
+        if meta.get("parts") and meta["parts"] != meta["dir"]:       # only Linux plans have build parts
             print(progress_line(0, parts_note(meta["dir"], meta["parts"])), flush=True)
         state = {"done": None, "stage": None}
 
