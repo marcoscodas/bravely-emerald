@@ -22,7 +22,9 @@ get contains Nintendo's data. Use it for yourself and **do not share it**.
 ## Step by step
 
 1. **Desktop Mode.** Press the Steam button, then Power, then *Switch to Desktop*.
-2. **Put the ROM somewhere without spaces in the path**, for example `/home/deck/emerald.gba`.
+2. **Have your ROM ready**, for example `/home/deck/emerald.gba`. The install folder (`--dir`) may have a space in its
+   path. The build then goes in a folder without spaces next to it (or in your home folder), which the script names; keep
+   both folders where they are. `--parts-dir <folder without spaces>` picks that folder yourself.
 3. **Open Konsole** (the terminal icon in the taskbar) and clone the repository:
    ```sh
    cd ~

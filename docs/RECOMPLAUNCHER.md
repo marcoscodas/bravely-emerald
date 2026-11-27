@@ -52,9 +52,23 @@ arguments the builder behaves as before. The first build downloads about 1 GB of
 
 The file can also be checked against the schema at https://recomplauncher.com/schema/recomplauncher.json.
 
+## Folders with spaces on Linux
+
+RecompLauncher's default Linux library is `~/Games/Recomp Library`, so by default `{install}` has a space. A build inside
+such a folder fails: `pkg-config` (Arch `pkgconf` 3.0.11 in the build container) splits SDL2's path at the space.
+
+So when the game folder has a space, the builder and `tools/deck/build_deck.sh` put SDL2, the build and the game files in
+`bravely-emerald-parts-<8 characters>`, above the first space when that is writable and on the same drive, otherwise
+`~/emerald-deck-parts-<8 characters>`. The characters come from the game folder's path, so two installs never share a build.
+The launcher script, saves and settings stay in `{install}/game/`, so Easy Setup starts the game as usual. The setup step's
+progress text and the builder window name both folders.
+
+Limits: the guide asks a game to write only under `{install}` and `{data}`, and this folder is outside them. Moving,
+backing up or uninstalling the game in the launcher does not move or remove it, and the launcher script holds full paths:
+do not move the game or that folder after building. `--parts-dir <folder without spaces>` picks the folder by hand.
+
 ## Open questions
 
 - Whether the launcher accepts a single `.gba` file for `game.kind: "iso"` (the schema names only `iso`, `folder`, `iso_or_folder`).
 - Whether `userdata/settings.txt` (`key=value` lines with no section) can be a `config` of format `ini`. Until that is known the
   settings stay in the game's own menu.
-- On Linux the builder needs paths without spaces (the ROM and the install folder); otherwise `--prepare` stops with a message.

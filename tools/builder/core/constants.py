@@ -19,8 +19,12 @@ SDL2_VERSION = "2.32.10"
 SDL2_IMAGE_VERSION = "2.8.12"
 # rough download sizes in MB, shown by the plan (the real ones are logged by the build)
 DOWNLOAD_MB = {"msys2": 85, "packages": 900, "deps": 12, "assets": 40}
-MSYS_INSTALLER_URL = "https://github.com/msys2/msys2-installer/releases/latest/download/msys2-x86_64-latest.exe"
-MSYS_INSTALLER_FILE = "msys2-x86_64-latest.exe"
+# A dated release with its checksum, not "latest": GitHub's latest became the nightly build, which publishes no checksum.
+# The build updates the MSYS2 packages afterwards, so an older installer is fine. To move it, change all three lines; the
+# hash is in the release's .sha256 file.
+MSYS_INSTALLER_FILE = "msys2-x86_64-20261120.exe"
+MSYS_INSTALLER_URL = "https://github.com/msys2/msys2-installer/releases/download/2026-11-20/" + MSYS_INSTALLER_FILE
+MSYS_INSTALLER_SHA256 = "8b715fa9e2a667f5c21b34a02d75185eead325370b9a7e5851cf56ae09160370"
 MSYS_INSTALLER_HOST_OK = ("https://github.com/msys2/msys2-installer/",)
 MIN_FREE_GB = 15
 HARD_MIN_FREE_GB = 4

@@ -29,6 +29,39 @@ def clean_path(p, what="path", allow_empty=False, no_space=True):
     return os.path.normpath(os.path.expanduser(p))
 
 
+def parts_note(d, parts):
+    """What to tell the player when the Linux install folder has a space and the build therefore goes elsewhere."""
+    return ("This folder has a space in its name (%s), where the build cannot run. The build tools, compiled files and game "
+            "files go in %s instead. The launcher, saves and settings stay in your folder. Do not move or delete either one."
+            % (d, parts))
+
+
+def _existing(path):
+    """`path`, or the nearest folder above it that exists."""
+    while not os.path.exists(path) and os.path.dirname(path) != path:
+        path = os.path.dirname(path)
+    return path
+
+
+def _drive(path):
+    return os.stat(path).st_dev
+
+
+def suggest_parts_dir(d, default_dir):
+    """The folder for the build parts of the install folder `d`, which has a space. It sits above the first space, when that
+    is writable and on d's drive; otherwise next to the default install folder. One folder per install folder, so two
+    installs never share a build. Same choice as auto_parts_dir in tools/deck/build_deck.sh."""
+    tag = "-parts-" + hashlib.sha1(d.encode("utf-8")).hexdigest()[:8]
+    above = d
+    while " " in above:
+        above = os.path.dirname(above)
+    suggestion = os.path.join(above, "bravely-emerald" + tag)
+    there = _existing(suggestion)
+    if _drive(there) == _drive(_existing(d)) and os.access(there, os.W_OK):
+        return suggestion
+    return default_dir + tag
+
+
 def source_path_problem(path, windows=True):
     """Plain-language reason why the build scripts cannot work in this folder, or None. Checked before anything starts.
     Unsupported: a space (make cannot handle it), letters outside plain ASCII (the MinGW tools read the path with the

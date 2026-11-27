@@ -15,7 +15,7 @@ from core import Builder, LEGAL_NOTE, load_settings, save_settings, validate_rom
 from core import report
 from core.repo import is_repo
 from core.source import Source, SourceError
-from core.validate import clean_path, cpu_profile, fmt_secs
+from core.validate import clean_path, cpu_profile, fmt_secs, parts_note, suggest_parts_dir
 from . import win95
 from .dialogs import HelpDialog, SettingsDialog
 
@@ -654,14 +654,18 @@ class MainWindow(QMainWindow):
     def dir_valid(self):
         """(ok, message) for the build folder field."""
         try:
-            clean_path(self.dir_edit.text(), "The build folder", no_space=(self.builder.host["kind"] != "windows"))
+            d = clean_path(self.dir_edit.text(), "The build folder", no_space=False)
         except ValueError as e:
             return False, str(e)
-        return True, ""
+        if self.builder.host["kind"] == "windows" or " " not in d:
+            return True, ""
+        return True, parts_note(d, suggest_parts_dir(d, self.builder.default_dir()))
 
     def check_dir(self):
         ok, msg = self.dir_valid()
-        self.set_msg(self.dir_text, "" if ok else msg)
+        self.set_msg(self.dir_text, msg)
+        if ok and msg:
+            self.dir_text.setStyleSheet("color:#8A4B00")           # a notice, not an error
         self.update_state()
 
     # ------------------------------------------------------------------ form state

@@ -10,7 +10,7 @@ import threading
 import time
 import urllib.request
 
-from .constants import (DOWNLOAD_MB, SDL2_VERSION, SDL2_IMAGE_VERSION, MSYS_PACKAGES, MSYS_INSTALLER_URL, MSYS_INSTALLER_FILE, MIN_FREE_GB, HARD_MIN_FREE_GB,
+from .constants import (DOWNLOAD_MB, SDL2_VERSION, SDL2_IMAGE_VERSION, MSYS_PACKAGES, MSYS_INSTALLER_URL, MSYS_INSTALLER_FILE, MSYS_INSTALLER_SHA256, MIN_FREE_GB, HARD_MIN_FREE_GB,
                         CONTAINER_RE)
 from .errors import container_hint, explain
 from .host import detect_host
@@ -19,7 +19,7 @@ from .probe import Probe, find_msys_root, linux_tool_version, podman_logs
 from .repo import is_repo
 from .settings import load_settings
 from .tasks import Step, Task, kill_tree
-from .validate import source_path_problem, clean_path, validate_rom, free_gb, network_ok, fmt_secs, sha256_file
+from .validate import source_path_problem, clean_path, suggest_parts_dir, validate_rom, free_gb, network_ok, fmt_secs, sha256_file
 
 CONTAINER_START_CHECK = "    checking that the build container starts"
 CONTAINER_STARTED = "    build container started"
@@ -350,7 +350,7 @@ class Builder:
         low = bool(opts.get("low_priority"))
         rom = ""
         if not self.probe.assets() or opts.get("force_assets"):
-            rom = clean_path(opts.get("rom", ""), "ROM path", no_space=(target == "linux32"))
+            rom = clean_path(opts.get("rom", ""), "ROM path", no_space=False)
             v = validate_rom(rom)
             if not v["ok"]:
                 raise ValueError("ROM: " + v["message"])
@@ -421,7 +421,11 @@ class Builder:
         return "Windows build", stages, steps, meta
 
     def _plan_linux(self, rom, jobs, low, opts):
-        d = clean_path(opts.get("dir") or self.default_dir(), "Install folder")
+        d = clean_path(opts.get("dir") or self.default_dir(), "Install folder", no_space=False)
+        parts = opts.get("parts_dir") or ""
+        if not parts and " " in d:                    # a build inside a folder with a space fails: it goes next to it
+            parts = suggest_parts_dir(d, self.default_dir())
+        parts = clean_path(parts, "Build parts folder", allow_empty=True)
         container = opts.get("container") or "emerald-build"
         if not isinstance(container, str) or not CONTAINER_RE.match(container):
             raise ValueError("Container name: letters, digits, '.', '_' and '-' only.")
@@ -431,6 +435,8 @@ class Builder:
                 raise ValueError("Prerequisites missing: " + "; ".join("%s (%s)" % (c["label"], c["detail"]) for c in blockers))
         argv = ["bash", os.path.join(self.repo, "tools", "deck", "build_deck.sh"), "--dir", d,
                 "--jobs", str(jobs), "--container", container]
+        if parts:
+            argv += ["--parts-dir", parts]
         if rom:
             argv += ["--rom", rom]
         if not opts.get("run_test"):
@@ -442,7 +448,7 @@ class Builder:
         ]
         stages = ["prereq", "container", "deps", "files", "compile", "link", "package"] + (["test"] if opts.get("run_test") else [])
         steps = [Step("tools/deck/build_deck.sh", "prereq", argv, {}, stage_rules=rules)]
-        meta = {"target": "linux32", "dir": d, "logdir": os.path.join(d, "builder-logs"), "low": low,
+        meta = {"target": "linux32", "dir": d, "parts": parts or d, "logdir": os.path.join(d, "builder-logs"), "low": low,
                 "container": container}
         return "Linux / Steam Deck build", stages, steps, meta
 
@@ -718,19 +724,6 @@ class Builder:
         if not self._run_msys2_install(task):
             raise RuntimeError("The MSYS2 installer did not finish (see the details).")
 
-    def _published_sha256(self, task):
-        """The checksum MSYS2 publishes next to the installer, or None when it cannot be read."""
-        try:
-            req = urllib.request.Request(MSYS_INSTALLER_URL + ".sha256", headers={"User-Agent": "bravely-builder"})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                m = re.match(r"\s*([0-9a-fA-F]{64})", r.read(400).decode("ascii", "replace"))
-            if m:
-                task.log("Published checksum (msys2-installer release): %s" % m.group(1).lower())
-                return m.group(1).lower()
-        except Exception as e:
-            task.log("Could not read the published checksum (%s); the download is only checked for size." % e)
-        return None
-
     def _download(self, task, dest, expected):
         part = dest + ".part"
         try:
@@ -756,7 +749,7 @@ class Builder:
             got_sha = sha256_file(part)
             task.log("Downloaded %d bytes, sha256 %s" % (os.path.getsize(part), got_sha))
             if expected and got_sha != expected:
-                task.log("ERROR: the installer does not match the published checksum. It was deleted; try again later.")
+                task.log("ERROR: the installer does not match its expected checksum. It was deleted; try again later.")
                 os.remove(part)
                 return False
             os.replace(part, dest)
@@ -781,8 +774,8 @@ class Builder:
             task.log("Using the installer you named in BRAVELY_MSYS2_INSTALLER: %s" % local)
             task.log("sha256 %s (compare it with the checksum on https://github.com/msys2/msys2-installer/releases)" % sha256_file(dest))
         else:
-            expected = self._published_sha256(task)
-            if os.path.isfile(dest) and expected and sha256_file(dest) == expected:
+            expected = MSYS_INSTALLER_SHA256
+            if os.path.isfile(dest) and sha256_file(dest) == expected:
                 task.log("already downloaded and verified: %s (%d MB): not downloaded again" % (dest, os.path.getsize(dest) >> 20))
             elif not self._download(task, dest, expected):
                 return False
@@ -820,7 +813,7 @@ class Builder:
                     "launch": ok, "savedir": os.path.join(d, "userdata", "saves"), "log": task.logfile}
         if meta.get("target") == "linux32":
             d = meta["dir"]
-            dist = os.path.join(d, "build", "dist")
+            dist = os.path.join(meta.get("parts") or d, "build", "dist")
             launcher = os.path.join(d, "emerald-launch.sh")
             ok = os.path.isfile(os.path.join(dist, "pokeemerald")) and os.path.isfile(launcher)
             return {"ok": ok, "target": "linux32", "folder": dist, "launcher": launcher, "zip": None,

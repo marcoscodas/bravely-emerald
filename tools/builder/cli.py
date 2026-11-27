@@ -24,6 +24,7 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import Builder, validate_rom          # noqa: E402
+from core.validate import parts_note            # noqa: E402
 from core.source import Source, SourceError     # noqa: E402
 
 
@@ -209,13 +210,16 @@ def prepare(a):
         if need and not a.allow_downloads:
             print("ERROR: the build needs downloads (about %d MB) and --allow-downloads was not given." % need)
             return 4
-        opts = {"targets": [target], "rom": game, "jobs": a.jobs, "low_priority": a.low, "dir": a.out, "container": a.container}
+        opts = {"targets": [target], "rom": game, "jobs": a.jobs, "low_priority": a.low, "dir": a.out, "container": a.container,
+                "parts_dir": a.parts_dir}
         try:
             label, stages, steps, meta = b.plan_build(opts)
         except ValueError as e:
             print("ERROR: " + str(e))
             return 2
         meta["container"] = a.container
+        if meta.get("parts") != meta.get("dir"):
+            print(progress_line(0, parts_note(meta["dir"], meta["parts"])), flush=True)
         state = {"done": None, "stage": None}
 
         def on_event(ev):
@@ -271,11 +275,13 @@ def main(argv=None):
     bp.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     bp.add_argument("--low", action="store_true", help="low priority")
     bp.add_argument("--out", default="", help="install folder (the game is copied there)")
+    bp.add_argument("--parts-dir", default="", help="Linux: folder without spaces for the build parts")
     bp.add_argument("--container", default="emerald-build")
     bp.add_argument("--run-test", action="store_true")
     pp = sub.add_parser("prepare", help="build without a window for RecompLauncher (prints progress lines)")
     pp.add_argument("--game", default="", help="your Pokemon Emerald ROM (.gba, or a .zip holding it)")
     pp.add_argument("--out", default="", help="folder the game is built into")
+    pp.add_argument("--parts-dir", default="", help="Linux: folder without spaces for the build parts")
     pp.add_argument("--target", default=None, choices=["windows", "linux32"])
     pp.add_argument("--repo", default=None)
     pp.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
@@ -310,7 +316,7 @@ def main(argv=None):
                 print("%-5s %-10s %s" % (c["status"], c["id"], c["detail"]))
             return 0
         target = a.target or ("windows" if b.host["kind"] == "windows" else "linux32")
-        opts = {"targets": [target], "rom": a.rom, "jobs": a.jobs, "low_priority": a.low, "dir": a.out,
+        opts = {"targets": [target], "rom": a.rom, "jobs": a.jobs, "low_priority": a.low, "dir": a.out, "parts_dir": a.parts_dir,
                 "container": a.container, "run_test": a.run_test}
         try:
             label, stages, steps, meta = b.plan_build(opts)

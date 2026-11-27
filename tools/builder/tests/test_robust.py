@@ -192,6 +192,34 @@ class PreconditionTests(unittest.TestCase):
         self.assertEqual(net["status"], "bad")
         self.assertIn("not reachable", net["detail"])
 
+    def test_msys2_installer_is_one_pinned_release_with_a_pinned_checksum(self):
+        # releases/latest on GitHub became MSYS2's nightly build, which publishes no .sha256 file
+        from core import constants
+        self.assertNotIn("/latest/", constants.MSYS_INSTALLER_URL)
+        self.assertRegex(constants.MSYS_INSTALLER_URL, r"/releases/download/\d{4}-\d{2}-\d{2}/")
+        self.assertTrue(constants.MSYS_INSTALLER_URL.endswith("/" + constants.MSYS_INSTALLER_FILE))
+        self.assertRegex(constants.MSYS_INSTALLER_SHA256, r"^[0-9a-f]{64}$")
+
+    def test_msys2_download_is_always_checked_against_the_pinned_checksum(self):
+        from core import constants
+        b = Builder(REPO)
+        asked = []
+
+        class T:
+            cancel_requested = False
+
+            def log(self, s):
+                pass
+
+            def set_stage(self, s):
+                pass
+        with mock.patch.object(b, "_download", lambda task, dest, expected: asked.append(expected) or False), \
+             mock.patch("urllib.request.urlopen", side_effect=OSError("offline")), \
+             mock.patch.dict(os.environ, {"BRAVELY_MSYS2_INSTALLER": ""}), \
+             mock.patch("tempfile.gettempdir", lambda d=tempfile.mkdtemp(): d):
+            self.assertFalse(b._run_msys2_install(T()))
+        self.assertEqual(asked, [constants.MSYS_INSTALLER_SHA256])
+
     def test_msys2_download_failure_is_a_logged_failure(self):
         b = Builder(REPO)
         lines = []

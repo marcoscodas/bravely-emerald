@@ -1,5 +1,6 @@
 """Exercise the Deck build entry point with simulated host and container commands."""
 
+import hashlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,12 @@ from tools.builder.core.errors import explain
 
 SCRIPT = Path(__file__).resolve().parents[2] / "deck" / "build_deck.sh"
 BASH = shutil.which("bash")
+SPACED = "Recomp Library/bravely emerald/game"
+
+
+def auto_parts(install_dir):
+    """Name of the build folder the script picks for an install folder with a space (made next to the first space)."""
+    return "bravely-emerald-parts-" + hashlib.sha1(str(install_dir).encode()).hexdigest()[:8]
 
 DISTROBOX = r"""
 if [[ $1 == --version ]]; then echo "distrobox: $STUB_VERSION"; exit 0; fi
@@ -104,8 +111,10 @@ case "$1" in
                 echo container-ok
                 ;;
             'pacman -Q '*) [[ $STUB_EXISTING == 1 ]] || exit 1 ;;
+            'cmake -S '*) [[ $STUB_FAILURE != cmake ]] || exit 1 ;;
+            'bash -c '*) bash -c "${!#}" || exit 1 ;;
             './run.sh') echo 'game launched' >> "$STUB_DIR/calls" ;;
-            '[ -d '*|'sudo bash -c '*|'gcc -m32 '*|'cmake -S '*|'cmake --build '*) ;;
+            '[ -d '*|'sudo bash -c '*|'gcc -m32 '*|'cmake --build '*) ;;
             *) exit 90 ;;
         esac
         ;;
@@ -117,7 +126,7 @@ esac
 @unittest.skipUnless(sys.platform.startswith("linux") and BASH, "requires Linux and Bash")
 class DeckContainerTests(unittest.TestCase):
     def run_builder(self, os_release="ID=linuxmint", version="1.8.2.5", existing=False, failure="",
-                    launch=None):
+                    launch=None, install="out", parts=None, build_sdl=False, inspect=None):
         with tempfile.TemporaryDirectory(prefix="deck-container-") as directory:
             root = Path(directory)
             bin_dir = root / "bin"
@@ -128,7 +137,10 @@ class DeckContainerTests(unittest.TestCase):
             (root / "os-release").write_text(os_release + "\n")
             if existing:
                 (root / "container").touch()
-            for name in ("awk", "cat", "chmod", "dirname", "ln", "mkdir", "rm", "sh"):
+            built = parts or install                  # deps32 and the build tree live here
+            if parts is None and " " in install:      # chosen by the script, one folder per install folder
+                built = auto_parts(root / install)
+            for name in ("awk", "bash", "cat", "chmod", "cut", "dirname", "ln", "mkdir", "rm", "sh", "sha1sum", "stat"):
                 (bin_dir / name).symlink_to(shutil.which(name))
             stubs = {
                 "distrobox": DISTROBOX,
@@ -138,6 +150,14 @@ class DeckContainerTests(unittest.TestCase):
                 "uname": "echo x86_64",
                 "nproc": "echo 2",
                 "sleep": "exit 0",
+                "sha256sum": 'case "$1" in\n'
+                             '*SDL2_image*) echo "393f5efb50536ec13ca4f4affb69cc9966d3c3f969e6c5e701faddf9f9785381  x" ;;\n'
+                             '*) echo "5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165  x" ;;\n'
+                             'esac',
+                "tar": 'mkdir -p "${2%.tar.gz}"',
+                "cmake": 'printf "%s\\n" "$@" >> "$STUB_DIR/cmake_args"\n'
+                         'if [[ $1 == --install ]]; then mkdir -p "$STUB_PREFIX/lib"; '
+                         ': > "$STUB_PREFIX/lib/libSDL2.a"; : > "$STUB_PREFIX/lib/libSDL2_image.a"; fi',
                 "df": "printf 'header\nfs 0 0 20000\n'",
                 "grep": 'args=("$@")\ncase "${!#}" in */os-release) args[-1]="$STUB_DIR/os-release";; esac\n'
                         f'exec "{shutil.which("grep")}" "${{args[@]}}"',
@@ -149,22 +169,23 @@ class DeckContainerTests(unittest.TestCase):
                 path = bin_dir / name
                 path.write_text(f"#!{BASH}\n{body}\n")
                 path.chmod(0o755)
+            libs = () if build_sdl else (f"{built}/deps32/lib/libSDL2.a", f"{built}/deps32/lib/libSDL2_image.a")
             for rel in (
-                ".assets_ok", "assets/ui2/ui_atlas.bin", "assets/ui/intro_margins.bin",
-                "out/deps32/lib/libSDL2.a", "out/deps32/lib/libSDL2_image.a",
-                "out/build/dist/run.sh", "out/userdata/settings.txt", "out/build/dist/pokeemerald",
+                ".assets_ok", "assets/ui2/ui_atlas.bin", "assets/ui/intro_margins.bin", *libs,
+                f"{built}/build/dist/run.sh", f"{install}/userdata/settings.txt", f"{built}/build/dist/pokeemerald",
             ):
                 path = root / rel
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.touch()
-            (root / "out/build/dist/pokeemerald").chmod(0o755)
-            (root / "out/build/dist/app0/voxel").mkdir(parents=True)
+            (root / built / "build/dist/pokeemerald").chmod(0o755)
+            (root / built / "build/dist/app0/voxel").mkdir(parents=True)
 
             env = {"HOME": directory, "PATH": str(bin_dir), "LC_ALL": "C", "STUB_DIR": directory,
                    "STUB_VERSION": version, "STUB_EXISTING": str(int(existing)), "STUB_FAILURE": failure,
-                   "DBX_NON_INTERACTIVE": "1"}
+                   "DBX_NON_INTERACTIVE": "1", "STUB_PREFIX": str(root / built / "deps32")}
+            extra = ["--parts-dir", str(root / parts)] if parts else []
             result = subprocess.run(
-                [BASH, str(script), "--dir", str(root / "out"), "--no-run"],
+                [BASH, str(script), "--dir", str(root / install), *extra, "--no-run"],
                 cwd=root, text=True, capture_output=True, timeout=10, env=env,
             )
             if launch is not None:
@@ -173,15 +194,58 @@ class DeckContainerTests(unittest.TestCase):
                 if launch == "missing":
                     (root / "container").unlink()
                 result = subprocess.run(
-                    [str(root / "out/emerald-launch.sh")],
+                    [str(root / install / "emerald-launch.sh")],
                     cwd=root, text=True, capture_output=True, timeout=10,
                     env=dict(env, XAUTHORITY=str(root / "xauth"),
                              STUB_FAILURE="disappeared" if launch == "race" else ""),
                 )
-            calls = (root / "calls").read_text().splitlines()
+            calls = (root / "calls").read_text().splitlines() if (root / "calls").exists() else []
+            if inspect is not None:
+                inspect(root)
             if failure in ("partial", "unlisted_partial"):
                 self.assertTrue((root / "container").is_file(), "partial container was removed")
             return result, calls
+
+    def test_spaced_folder_builds_in_a_folder_without_spaces_and_the_launcher_works(self):
+        def inspect(root):
+            built = root / auto_parts(root / SPACED)
+            self.assertEqual((built / "build/dist/userdata").resolve(), (root / SPACED / "userdata").resolve())
+            launcher = (root / SPACED / "emerald-launch.sh").read_text()
+            self.assertIn("cd '%s' || exit 1" % (built / "build/dist"), launcher)
+            for name in ("build", "build-deps", "deps32"):
+                self.assertFalse((root / SPACED / name).exists(), name)
+            desktop = (root / ".local/share/applications/pokemon-emerald-deck.desktop").read_text()
+            self.assertIn('Exec="%s"' % (root / SPACED / "emerald-launch.sh"), desktop)
+        result, calls = self.run_builder(existing=True, install=SPACED, launch="", inspect=inspect)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sum("./run.sh" in c for c in calls), 1, calls)
+
+    def test_the_script_says_where_the_build_goes_only_for_a_space(self):
+        result, calls = self.run_builder(existing=True, install=SPACED)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("has a space", result.stdout)
+        self.assertIn("bravely-emerald-parts-", result.stdout)
+        self.assertTrue(any("-DDECK_DEPS32=" in c and "bravely-emerald-parts-" in c for c in calls), calls)
+        plain, calls = self.run_builder(existing=True)
+        self.assertNotIn("has a space", plain.stdout)
+        self.assertFalse(any("bravely-emerald-parts" in c for c in calls), calls)
+
+    def test_parts_dir_keeps_the_build_out_of_the_spaced_folder(self):
+        def inspect(root):
+            self.assertEqual((root / "parts/build/dist/userdata").resolve(), (root / SPACED / "userdata").resolve())
+            launcher = (root / SPACED / "emerald-launch.sh").read_text()
+            self.assertIn("cd '%s' || exit 1" % (root / "parts/build/dist"), launcher)
+            self.assertFalse((root / SPACED / "build").exists())
+            self.assertFalse((root / SPACED / "deps32").exists())
+        result, calls = self.run_builder(existing=True, install=SPACED, parts="parts", launch="", inspect=inspect)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sum("./run.sh" in c for c in calls), 1, calls)
+
+    def test_parts_dir_with_a_space_is_refused(self):
+        result, calls = self.run_builder(existing=True, parts="more parts")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("--parts-dir", result.stderr)
+        self.assertEqual(calls, [])
 
     def test_desktop_upgrades_before_basic_packages_and_multilib(self):
         result, calls = self.run_builder()

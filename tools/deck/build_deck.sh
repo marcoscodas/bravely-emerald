@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-script Steam Deck builder. Run it on the Deck, in Desktop Mode, from a clone of this repository:
 #
-#     bash tools/deck/build_deck.sh --rom /path/to/your/emerald.gba [--dir <install dir>] [--jobs N] [--no-run]
+#     bash tools/deck/build_deck.sh --rom /path/to/your/emerald.gba [--dir <install dir>] [--parts-dir <dir>] [--jobs N] [--no-run]
 #
 # What it does (every step can be repeated; finished steps are skipped):
 #   1. checks the Deck (distrobox, podman, free disk space) and your ROM file;
@@ -27,6 +27,7 @@ IMAGE=docker.io/library/archlinux:latest
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ROM=""
 DIR="$HOME/emerald-deck"
+PARTS=""
 JOBS="$(nproc 2>/dev/null || echo 4)"
 [ "$JOBS" -gt 4 ] && JOBS=4
 CONTAINER="emerald-build"
@@ -39,9 +40,11 @@ die()  { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<USAGE
-usage: $0 --rom <emerald.gba> [--dir <install dir>] [--jobs N] [--container NAME] [--no-run]
+usage: $0 --rom <emerald.gba> [--dir <install dir>] [--parts-dir <dir>] [--jobs N] [--container NAME] [--no-run]
   --rom        your own Pokemon Emerald dump (.gba). Needed the first time only.
   --dir        where the build, SDL2 libraries, saves and settings live (default: \$HOME/emerald-deck)
+  --parts-dir  put the SDL2 libraries, the build and the game files in this folder (no spaces); the launcher,
+               saves and settings stay in --dir. Chosen automatically when --dir has a space.
   --jobs       parallel compile jobs (default: CPU count, at most 4)
   --container  distrobox container name (default: emerald-build)
   --no-run     skip the 12 second start-up test at the end
@@ -53,6 +56,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --rom) ROM="${2:-}"; shift 2 ;;
         --dir) DIR="${2:-}"; shift 2 ;;
+        --parts-dir) PARTS="${2:-}"; shift 2 ;;
         --jobs) JOBS="${2:-}"; shift 2 ;;
         --container) CONTAINER="${2:-}"; shift 2 ;;
         --no-run) RUN=0; shift ;;
@@ -71,10 +75,44 @@ command -v podman >/dev/null || die "podman not found (distrobox needs it)."
 case "$JOBS" in ''|*[!0-9]*) die "--jobs needs a number" ;; esac
 [ "$JOBS" -ge 1 ] || die "--jobs needs a number of at least 1"
 [ -n "$DIR" ] || die "--dir needs a path"
+[ "${PARTS#* }" = "$PARTS" ] || die "--parts-dir must be a folder without spaces: $PARTS"
 mkdir -p "$DIR" || die "cannot create $DIR"
 DIR="$(cd "$DIR" && pwd)"
 [ "${REPO#* }" = "$REPO" ] || die "the repository path contains a space; move the clone somewhere without spaces"
-[ "${DIR#* }" = "$DIR" ] || die "the install dir contains a space; choose another with --dir"
+# A build inside a folder with a space fails (pkgconf splits SDL2's path), so the build goes next to it: above the first
+# space when that is writable and on the same drive, otherwise in $HOME. One folder per install folder (the hash), so two
+# installs never share a build. Same choice as suggest_parts_dir in tools/builder/core/validate.py.
+auto_parts_dir() {
+    local above=$DIR tag
+    while [ "${above#* }" != "$above" ]; do above=$(dirname "$above"); done
+    tag=$(printf '%s' "$DIR" | sha1sum)
+    tag=${tag:0:8}
+    if [ -w "$above" ] && [ "$(stat -c %d "$above")" = "$(stat -c %d "$DIR")" ]; then
+        printf '%s' "${above%/}/bravely-emerald-parts-$tag"
+    else
+        printf '%s' "$HOME/emerald-deck-parts-$tag"
+    fi
+}
+SPACE_MOVED=0
+if [ -z "$PARTS" ]; then
+    if [ "${DIR#* }" = "$DIR" ]; then
+        PARTS="$DIR"
+    else
+        PARTS="$(auto_parts_dir)"
+        SPACE_MOVED=1
+    fi
+fi
+if [ "$PARTS" != "$DIR" ]; then
+    [ "${PARTS#* }" = "$PARTS" ] || die "no folder without spaces found for the build; give one with --parts-dir"
+    mkdir -p "$PARTS" || die "cannot create $PARTS; give another folder with --parts-dir"
+    PARTS="$(cd "$PARTS" && pwd)"
+    [ "${PARTS#* }" = "$PARTS" ] || die "--parts-dir must be a folder without spaces: $PARTS"
+fi
+if [ "$SPACE_MOVED" -eq 1 ]; then
+    note "the install folder has a space in its name ($DIR), where the build cannot run."
+    note "The SDL2 libraries, the build and the game files go in $PARTS instead."
+    note "The launcher, saves and settings stay in the install folder. Do not move or delete either folder."
+fi
 
 HAVE_ASSETS=0
 if [ "$FORCE_ASSETS" -eq 0 ] && [ -f "$REPO/.assets_ok" ] && [ -f "$REPO/assets/ui2/ui_atlas.bin" ]; then HAVE_ASSETS=1; fi
@@ -83,20 +121,20 @@ if [ "$HAVE_ASSETS" -eq 0 ]; then
     [ -f "$ROM" ] || die "ROM not found: $ROM"
     [ -r "$ROM" ] || die "ROM not readable: $ROM"
     ROM="$(cd "$(dirname "$ROM")" && pwd)/$(basename "$ROM")"
-    [ "${ROM#* }" = "$ROM" ] || die "the ROM path contains a space; use a path without spaces"
     note "ROM: $ROM (only read to check it; it is not copied)"
 else
     note "game files already present in the repository: ROM not needed"
 fi
 
 free_mb() { df -Pm "$1" | awk 'NR == 2 { print $4 }'; }
-FREE_HOME=$(free_mb "$HOME"); FREE_DIR=$(free_mb "$DIR")
-note "free space: $FREE_HOME MB in \$HOME (container image and libraries), $FREE_DIR MB in $DIR"
+FREE_HOME=$(free_mb "$HOME"); FREE_DIR=$(free_mb "$PARTS")
+note "free space: $FREE_HOME MB in \$HOME (container image and libraries), $FREE_DIR MB in $PARTS"
 [ "$FREE_HOME" -ge "$MIN_FREE_HOME_MB" ] || note "WARNING: less than $MIN_FREE_HOME_MB MB free in \$HOME; the container may not fit"
-[ "$FREE_DIR" -ge "$MIN_FREE_DIR_MB" ] || die "less than $MIN_FREE_DIR_MB MB free in $DIR"
+[ "$FREE_DIR" -ge "$MIN_FREE_DIR_MB" ] || die "less than $MIN_FREE_DIR_MB MB free in $PARTS"
 curl -fsS -m 15 -o /dev/null https://github.com || die "no internet (github.com unreachable): the build downloads packages and game files."
 note "repository: $REPO"
 note "install dir: $DIR, container: $CONTAINER, jobs: $JOBS"
+[ "$PARTS" = "$DIR" ] || note "build parts: $PARTS"
 
 # run a command string inside the container; heavy ones at the lowest priority
 enter_container() {
@@ -188,7 +226,7 @@ probe_output=$(inbox 'echo container-ok' 2>/dev/null) \
 grep -Fxq -- 'container-ok' <<<"$probe_output" \
     || die "Distrobox did not run the startup check for '$CONTAINER'. Check that the container still exists."
 note "build container started"
-for p in "$REPO" "$DIR"; do
+for p in "$REPO" "$DIR" "$PARTS"; do
     inbox "[ -d '$p' ]" || die "$p is not visible inside the container"
 done
 
@@ -203,23 +241,23 @@ else
     inbox "sudo bash -c 'grep -q \"^\\[multilib\\]\" /etc/pacman.conf || printf \"\\n[multilib]\\nInclude = /etc/pacman.d/mirrorlist\\n\" >> /etc/pacman.conf; pacman -Syu --noconfirm && pacman -S --needed --noconfirm $PKGS'" \
         || die "package install failed. Run the script again; if it repeats, see docs/BUILD_DECK.md, Troubleshooting."
 fi
-T32="$DIR/.t32.c"
+T32="$PARTS/.t32.c"
 cat > "$T32" <<'T32SRC'
 #include <stdio.h>
 int main(void) { printf("%u\n", (unsigned)sizeof(void *)); return 0; }
 T32SRC
-inbox "gcc -m32 '$T32' -o '$DIR/.t32' && [ \"\$('$DIR/.t32')\" = 4 ]" \
+inbox "gcc -m32 '$T32' -o '$PARTS/.t32' && [ \"\$('$PARTS/.t32')\" = 4 ]" \
     || die "the 32-bit compiler does not work in the container"
-rm -f "${DIR:?}/.t32.c" "${DIR:?}/.t32"
+rm -f "${PARTS:?}/.t32.c" "${PARTS:?}/.t32"
 note "32-bit compiler works"
 
 # ------------------------------------------------------------------ 3. SDL2 (32-bit, static)
 say "3/6 SDL2 $SDL_VER and SDL2_image $SDL_IMG_VER (32-bit, static)"
-P="$DIR/deps32"
+P="$PARTS/deps32"
 if [ -f "$P/lib/libSDL2.a" ] && [ -f "$P/lib/libSDL2_image.a" ]; then
     note "already built in $P"
 else
-    S="$DIR/build-deps"; mkdir -p "$S" "$P"
+    S="$PARTS/build-deps"; mkdir -p "$S" "$P"
     fetch() { # <url> <file> <sha256>
         [ -f "$S/$2" ] || curl -fsSL -o "$S/$2" "$1" || die "download failed: $1"
         got=$(sha256sum "$S/$2" | cut -d' ' -f1)
@@ -265,7 +303,7 @@ fi
 
 # ------------------------------------------------------------------ 5. build
 say "5/6 Building the game (the first build takes a while, 15 to 40 minutes)"
-B="$DIR/build"
+B="$PARTS/build"
 CACHE="$B/CMakeCache.txt"
 if [ -f "$CACHE" ] && ! grep -q "^CMAKE_HOME_DIRECTORY:INTERNAL=$REPO\$" "$CACHE"; then
     note "stale CMake cache from another checkout, dropping it"
@@ -317,7 +355,7 @@ cat > "$APPS/pokemon-emerald-deck.desktop" <<DESKTOP
 Type=Application
 Name=Pokemon Emerald (Deck)
 Comment=Pokemon Emerald, Steam Deck build made from your own ROM
-Exec=$LAUNCH
+Exec="$LAUNCH"
 Path=$DIST
 Terminal=false
 Categories=Game;
@@ -361,6 +399,7 @@ cat <<SUMMARY
 ==========================================================
  Done.
    Game folder : $DIST
+   Build parts : $PARTS (do not move or delete it)
    Saves/config: $DIR/userdata  (settings.txt, saves/)
    Launcher    : $LAUNCH
    Start-up test: $RESULT

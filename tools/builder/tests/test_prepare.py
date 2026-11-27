@@ -118,6 +118,31 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(seen["rom"], self.rom)
 
+    def prepare_output(self, parts):
+        """prepare with a planner that returns these build parts; the build itself fails at once."""
+        out_dir = os.path.join(self.tmp, "Recomp Library")
+
+        class Task:
+            final, cur_step, logfile, hints = {"step": "x"}, "x", "log.txt", []
+
+        class B(FakeBuilder):
+            def plan_build(self, opts):
+                return "Linux", ["prereq"], [], {"dir": out_dir, "parts": parts or out_dir}
+
+            def start(self, label, stages, steps, meta, kind, listener):
+                listener({"type": "state", "state": "failed"})
+                return Task()
+        old = cli.make_builder
+        cli.make_builder = lambda repo, dry=False, force=False: (B(0), None)
+        try:
+            return run_prepare(["--game", self.rom, "--target", "linux32", "--out", out_dir])[1]
+        finally:
+            cli.make_builder = old
+
+    def test_prepare_says_where_the_build_files_go_when_they_are_elsewhere(self):
+        self.assertIn("/x/parts", self.prepare_output("/x/parts"))
+        self.assertNotIn("space", self.prepare_output(""))
+
     def test_app_routes_prepare_to_the_cli(self):
         import app
         import cli as cli_mod
