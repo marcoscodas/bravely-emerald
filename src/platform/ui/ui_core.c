@@ -59,7 +59,9 @@ void Ui_Init(void)
 
 bool Ui_IsEnabled(void)
 {
-    return UiAssets_Ready() && VitaExtras_GetFast(FAST_EXTRA_UI_V2) != 0;
+    // The new interface is switched off: every screen and overlay of it asks here, so the port's original interface is used,
+    // also for players whose settings.txt still has ui_v2=1. The menu option was removed with it.
+    return false;
 }
 
 bool Ui_IsOpen(void)

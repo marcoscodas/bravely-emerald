@@ -44,6 +44,8 @@ The full list is under [Features](#features).
 
 ### New interface (OPTIONS > MODES > NEW UI (TEST), off by default)
 
+> **Switched off since 1.0.** `Ui_IsEnabled()` returns false and the NEW UI option is gone. The code is kept; the text below describes it.
+
 Drawn natively at 960×544 over the 3D world. Every screen works with the buttons and with touch
 (first tap selects, a second tap on the selection confirms).
 

@@ -1,5 +1,7 @@
 # Native UI (Emerald 3DS style)
 
+> **Switched off since 1.0.** `Ui_IsEnabled()` returns false and the NEW UI option is gone. The code is kept; the text below describes it.
+
 The port has two interfaces, chosen with the option **NEW UI** (OPTIONS > MODES):
 
 - **The new UI** (`src/platform/ui/`), described in the next section: screens, dialogue boxes and
